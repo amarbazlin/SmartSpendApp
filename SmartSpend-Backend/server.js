@@ -11,7 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes
+
 app.use("/api/income", require("./routes/incomeRoutes"));
 app.use("/api/expense", require("./routes/expenseRoutes"));
 app.use("/api/sms", require("./routes/smsRoutes"));
