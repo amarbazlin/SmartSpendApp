@@ -1,1 +1,1 @@
-{"name":"SmartSpendApp","version":"0.0.1","private":true,"scripts":{"start":"node node_modules/react-native/local-cli/cli.js start"},"dependencies":{"nativewind":"^4.1.23","react-native":"0.80.1","react-native-svg":"^15.12.0"}}
+{"name":"SmartSpendApp","version":"0.0.1","private":true,"scripts":{"start":"node node_modules/react-native/local-cli/cli.js start"},"dependencies":{"expo":"^53.0.19","nativewind":"^4.1.23","react-native":"0.80.1","react-native-svg":"^15.12.0"}}
