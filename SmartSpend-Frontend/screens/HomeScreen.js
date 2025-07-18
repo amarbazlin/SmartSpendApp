@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ScrollView,
   SafeAreaView,
+  Image,
 } from 'react-native';
 import { 
   Home, 
@@ -22,8 +23,23 @@ import {
   Eye, 
   CheckCircle 
 } from 'lucide-react-native';
+import Categories from './Categories';
 
 export default function HomeScreen() {
+  const [currentScreen, setCurrentScreen] = useState('home');
+
+  const navigateToCategories = () => {
+    setCurrentScreen('categories');
+  };
+
+  const navigateToHome = () => {
+    setCurrentScreen('home');
+  };
+
+  if (currentScreen === 'categories') {
+    return <Categories onBack={navigateToHome} />;
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
@@ -32,7 +48,11 @@ export default function HomeScreen() {
           <Menu size={24} color="#374151" />
           <View style={styles.headerCenter}>
             <View style={styles.logo}>
-              <Text style={styles.logoText}>S</Text>
+              <Image
+                source={require('./images/App_Logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
             <Text style={styles.logoLabel}>SmartSpend</Text>
           </View>
@@ -99,12 +119,12 @@ export default function HomeScreen() {
 
           {/* Feature Shortcuts */}
           <View style={styles.featuresGrid}>
-            <View style={styles.featureItem}>
+            <TouchableOpacity style={styles.featureItem} onPress={navigateToCategories}>
               <View style={[styles.featureIcon, styles.greenIcon]}>
                 <BarChart3 size={32} color="#059669" />
               </View>
               <Text style={styles.featureText}>Personalized Budgeting</Text>
-            </View>
+            </TouchableOpacity>
             
             <View style={styles.featureItem}>
               <View style={[styles.featureIcon, styles.blueIcon]}>
@@ -207,11 +227,15 @@ const styles = StyleSheet.create({
   logo: {
     width: 48,
     height: 48,
-    backgroundColor: '#60A5FA',
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   logoText: {
     color: 'white',
