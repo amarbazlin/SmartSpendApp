@@ -8,6 +8,8 @@ import {
   ScrollView,
   SafeAreaView,
   Image,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { 
   Home, 
@@ -21,12 +23,136 @@ import {
   PiggyBank, 
   CreditCard, 
   Eye, 
-  CheckCircle 
+  CheckCircle,
+  Lock,
+  User,
+  Mail,
+  X,
+  Bell,
+  Palette,
+  Globe,
+  LogOut,
+  Settings
 } from 'lucide-react-native';
-import Categories from './Categories';
 
-export default function HomeScreen() {
+// Import your Categories component
+import Categories from './Categories'; // Adjust the path as needed
+
+const { width } = Dimensions.get('window');
+
+// Side Menu Component
+const SideMenu = ({ isOpen, onClose, onLogout }) => {
+  return (
+    <Modal
+      visible={isOpen}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        {/* Menu */}
+        <View style={styles.sideMenu}>
+          <ScrollView style={styles.menuContent}>
+            {/* Header with Close Button */}
+            <View style={styles.menuHeader}>
+              <View style={styles.profileSection}>
+                <View style={styles.profileImage}>
+                  <Image
+                    source={require('./images/App_Logo.png')}
+                    style={styles.profileImageContent}
+                    resizeMode="cover"
+                  />
+                </View>
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName}>John Doe</Text>
+                  <Text style={styles.profileEmail}>john@example.com</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <X size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Menu Items */}
+            <View style={styles.menuItems}>
+              {/* Passcode Setting */}
+              <TouchableOpacity style={styles.menuItem}>
+                <Lock size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Passcode</Text>
+                  <Text style={styles.menuItemSubtitle}>OFF</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Main Currency Setting */}
+              <TouchableOpacity style={styles.menuItem}>
+                <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
+                  <Text style={styles.menuItemSubtitle}>LKR(Rs.)</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Sub Currency Setting */}
+              <TouchableOpacity style={styles.menuItem}>
+                <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Alarm Setting */}
+              <TouchableOpacity style={styles.menuItem}>
+                <Bell size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Alarm Setting</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Style */}
+              <TouchableOpacity style={styles.menuItem}>
+                <Palette size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Style</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Language Setting */}
+              <TouchableOpacity style={styles.menuItem}>
+                <Globe size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Language Setting</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Logout */}
+              <TouchableOpacity 
+                style={[styles.menuItem, styles.logoutItem]}
+                onPress={onLogout}
+              >
+                <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.logoutText}>Logout</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+        
+        {/* Backdrop */}
+        <TouchableOpacity 
+          style={styles.backdrop} 
+          onPress={onClose}
+          activeOpacity={1}
+        />
+      </View>
+    </Modal>
+  );
+};
+
+export default function HomeScreen({ onLogout }) {
   const [currentScreen, setCurrentScreen] = useState('home');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const navigateToCategories = () => {
     setCurrentScreen('categories');
@@ -36,6 +162,22 @@ export default function HomeScreen() {
     setCurrentScreen('home');
   };
 
+  const toggleMenu = () => {
+    setIsMenuOpen(!isMenuOpen);
+  };
+
+  const closeMenu = () => {
+    setIsMenuOpen(false);
+  };
+
+  const handleLogout = () => {
+    closeMenu();
+    if (onLogout) {
+      onLogout();
+    }
+  };
+
+  // Render Categories screen when navigated to
   if (currentScreen === 'categories') {
     return <Categories onBack={navigateToHome} />;
   }
@@ -45,7 +187,9 @@ export default function HomeScreen() {
       <ScrollView style={styles.scrollView}>
         {/* Header */}
         <View style={styles.header}>
-          <Menu size={24} color="#374151" />
+          <TouchableOpacity onPress={toggleMenu}>
+            <Menu size={24} color="#374151" />
+          </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={styles.logo}>
               <Image
@@ -126,26 +270,26 @@ export default function HomeScreen() {
               <Text style={styles.featureText}>Personalized Budgeting</Text>
             </TouchableOpacity>
             
-            <View style={styles.featureItem}>
+            <TouchableOpacity style={styles.featureItem}>
               <View style={[styles.featureIcon, styles.blueIcon]}>
                 <PiggyBank size={32} color="#2563EB" />
               </View>
               <Text style={styles.featureText}>Expense Analysis</Text>
-            </View>
+            </TouchableOpacity>
             
-            <View style={styles.featureItem}>
+            <TouchableOpacity style={styles.featureItem}>
               <View style={[styles.featureIcon, styles.grayIcon]}>
                 <Target size={32} color="#4B5563" />
               </View>
               <Text style={styles.featureText}>Investment Advice</Text>
-            </View>
+            </TouchableOpacity>
             
-            <View style={styles.featureItem}>
+            <TouchableOpacity style={styles.featureItem}>
               <View style={[styles.featureIcon, styles.pinkIcon]}>
                 <DollarSign size={32} color="#DB2777" />
               </View>
               <Text style={styles.featureText}>Smart Alerts</Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* Recent Transactions */}
@@ -202,6 +346,13 @@ export default function HomeScreen() {
           <Text style={styles.navText}>Stats</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Side Menu */}
+      <SideMenu 
+        isOpen={isMenuOpen} 
+        onClose={closeMenu} 
+        onLogout={handleLogout} 
+      />
     </SafeAreaView>
   );
 }
@@ -236,11 +387,6 @@ const styles = StyleSheet.create({
   logoImage: {
     width: '100%',
     height: '100%',
-  },
-  logoText: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
   },
   logoLabel: {
     fontSize: 14,
@@ -289,7 +435,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   incomeButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#00B8A9',
   },
   expenseButton: {
     backgroundColor: '#F87171',
@@ -300,7 +446,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   balanceCard: {
-    backgroundColor: '#4ADE80',
+    backgroundColor: '#00B8A9',
     borderRadius: 24,
     padding: 24,
     marginBottom: 24,
@@ -478,7 +624,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bottomNav: {
-    backgroundColor: '#4ADE80',
+    backgroundColor: '#00B8A9',
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 16,
@@ -493,5 +639,103 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     marginTop: 4,
+  },
+  // Side Menu Styles
+  modalOverlay: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  sideMenu: {
+    width: width * 0.8,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 2,
+      height: 0,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  menuContent: {
+    flex: 1,
+    padding: 24,
+  },
+  menuHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  profileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  profileImage: {
+    width: 48,
+    height: 48,
+    backgroundColor: '#00B8A9',
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  profileImageContent: {
+    width: '100%',
+    height: '100%',
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  profileEmail: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  closeButton: {
+    padding: 8,
+  },
+  menuItems: {
+    flex: 1,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  menuIcon: {
+    marginRight: 16,
+  },
+  menuItemContent: {
+    flex: 1,
+  },
+  menuItemTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1F2937',
+  },
+  menuItemSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  logoutItem: {
+    marginTop: 32,
+    backgroundColor: '#FEF2F2',
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#EF4444',
   },
 });

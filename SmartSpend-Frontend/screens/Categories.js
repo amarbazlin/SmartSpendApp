@@ -44,6 +44,46 @@ const Categories = ({ onBack }) => {
       remaining: 65.00,
       color: '#F4E4A6',
     },
+    {
+      id: 4,
+      name: 'Entertainment',
+      icon: '🎬',
+      limit: 120.00,
+      remaining: 85.50,
+      color: '#F8BBD9',
+    },
+    {
+      id: 5,
+      name: 'Shopping',
+      icon: '🛍️',
+      limit: 200.00,
+      remaining: 125.75,
+      color: '#C7D2FE',
+    },
+    {
+      id: 6,
+      name: 'Health & Fitness',
+      icon: '💪',
+      limit: 80.00,
+      remaining: 30.25,
+      color: '#A7F3D0',
+    },
+    {
+      id: 7,
+      name: 'Utilities',
+      icon: '⚡',
+      limit: 180.00,
+      remaining: 15.00,
+      color: '#FEF3C7',
+    },
+    {
+      id: 8,
+      name: 'Personal Care',
+      icon: '💄',
+      limit: 75.00,
+      remaining: 42.50,
+      color: '#FECACA',
+    },
   ];
 
   const totalRemaining = categories.reduce((sum, category) => sum + category.remaining, 0);
