@@ -1,0 +1,80 @@
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Metro, React Native, and bundler cache
+.expo/
+.expo-shared/
+.expo-dev-client/
+.vscode/
+*.expo
+metro-cache/
+.babelrc
+babel.config.js
+babel.config.json
+babel-transform-cache/
+
+# Build artifacts
+android/app/build/
+ios/Pods/
+ios/build/
+ios/DerivedData/
+build/
+*.xcworkspace
+*.xcuserstate
+*.xcodeproj
+*.pbxproj
+*.mode1v3
+*.mode2v3
+
+# React Native specific
+*.keystore
+*.jks
+*.p12
+
+# Mac system files
+.DS_Store
+
+# Android/Gradle
+.gradle
+/local.properties
+*.iml
+.idea/
+
+# Xcode
+*.xcuserdata
+*.xcuserstate
+
+# Watchman
+.watchmanconfig
+
+# Environment files
+.env
+.env.*
+
+# Coverage reports
+coverage/
+
+# Testing
+jest/
+*.test.js
+*.spec.js
+
+# Misc
+*.swp
+*.swo
+*.orig
+
+# Lint cache
+.eslintcache
+
+# Package lock files (optional: use only one)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
