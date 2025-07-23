@@ -1,4 +1,6 @@
 import React from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,24 +20,24 @@ import {
   Plus
 } from 'lucide-react-native';
 
+
 const Categories = ({ onBack }) => {
-  const categories = [
-    {
-      id: 1,
-      name: 'Food',
-      icon: '🍜',
-      limit: 100.00,
+  const [categories, setCategories] = useState([
+    { id: 1, 
+      name: 'Food', 
+      icon: '🍜', 
+      limit: 100.00, 
       remaining: 45.00,
-      color: '#E8E8E8',
-    },
-    {
-      id: 2,
-      name: 'Transport',
-      icon: '🚌',
-      limit: 150.00,
-      remaining: 65.00,
-      color: '#A8C8EC',
-    },
+      color: '#E8E8E8' },
+
+    { 
+      id: 2, 
+      name: 'Transport', 
+      icon: '🚌', 
+      limit: 150.00, 
+      remaining: 65.00, 
+      color: '#A8C8EC' },
+ 
     {
       id: 3,
       name: 'Education',
@@ -84,7 +86,7 @@ const Categories = ({ onBack }) => {
       remaining: 42.50,
       color: '#FECACA',
     },
-  ];
+  ]);
 
   const totalRemaining = categories.reduce((sum, category) => sum + category.remaining, 0);
 
@@ -167,7 +169,7 @@ const Categories = ({ onBack }) => {
         </TouchableOpacity>
         <TouchableOpacity style={styles.navItem}>
           <Target size={24} color="white" />
-          <Text style={styles.navText}>Goals</Text>
+          <Text style={styles.navText}>Accounts</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.navItem}>
           <BarChart3 size={24} color="white" />
@@ -330,7 +332,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   bottomNav: {
-    backgroundColor: '#4ADE80',
+    backgroundColor: '#008080',
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 16,

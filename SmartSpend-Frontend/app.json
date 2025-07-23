@@ -1,0 +1,21 @@
+{
+  "android": {
+    "package": "com.anonymous.smartspendapp"
+  },
+  "ios": {
+    "bundleIdentifier": "com.anonymous.smartspendapp"
+  },
+  "expo": {
+    "web": {
+      "output": "static",
+      "bundler": "metro",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "android": {
+      "package": "com.anonymous.smartspendapp"
+    },
+    "ios": {
+      "bundleIdentifier": "com.anonymous.smartspendapp"
+    }
+  }
+}

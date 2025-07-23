@@ -28,16 +28,18 @@ import {
   User,
   Mail,
   X,
-  Bell,
+  Bell, 
   Palette,
   Globe,
   LogOut,
   Settings
 } from 'lucide-react-native';
 
-// Import your Categories component
+// Import your Categories and Transaction components
 import Categories from './Categories'; // Adjust the path as needed
-
+import Transaction from './Transaction'; // Adjust the path as needed
+import TransactionsScreen from './TransactionScreen';
+import { supabase } from '../services/supabase'; // Adjust the path as needed
 const { width } = Dimensions.get('window');
 
 // Side Menu Component
@@ -153,13 +155,25 @@ const SideMenu = ({ isOpen, onClose, onLogout }) => {
 export default function HomeScreen({ onLogout }) {
   const [currentScreen, setCurrentScreen] = useState('home');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [transactionType, setTransactionType] = useState(null); // 'income' or 'expense'
 
   const navigateToCategories = () => {
     setCurrentScreen('categories');
   };
 
+  const navigateToTransaction = (type = null) => {
+    setTransactionType(type); // Set whether it's income or expense
+    setCurrentScreen('transaction');
+  };
+
+  // New function to navigate to TransactionsScreen
+  const navigateToTransactionsScreen = () => {
+    setCurrentScreen('transactionsScreen');
+  };
+
   const navigateToHome = () => {
     setCurrentScreen('home');
+    setTransactionType(null); // Clear transaction type when going back to home
   };
 
   const toggleMenu = () => {
@@ -180,6 +194,22 @@ export default function HomeScreen({ onLogout }) {
   // Render Categories screen when navigated to
   if (currentScreen === 'categories') {
     return <Categories onBack={navigateToHome} />;
+  }
+
+  // Render Transaction screen when navigated to
+  if (currentScreen === 'transaction') {
+    return (
+      <Transaction
+        onBack={navigateToHome} 
+        transactionType={transactionType}
+        onTransactionComplete={navigateToHome} // Optional: callback when transaction is saved
+      />
+    );
+  }
+
+  // Render TransactionsScreen when navigated to
+  if (currentScreen === 'transactionsScreen') {
+    return <TransactionsScreen onBack={navigateToHome} />;
   }
 
   return (
@@ -218,10 +248,16 @@ export default function HomeScreen({ onLogout }) {
         <View style={styles.content}>
           {/* Income & Expense Buttons */}
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={[styles.button, styles.incomeButton]}>
+            <TouchableOpacity 
+              style={[styles.button, styles.incomeButton]} 
+              onPress={() => navigateToTransaction('income')}
+            >
               <Text style={styles.buttonText}>+ Add Income</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.button, styles.expenseButton]}>
+            <TouchableOpacity 
+              style={[styles.button, styles.expenseButton]} 
+              onPress={() => navigateToTransaction('expense')}
+            >
               <Text style={styles.buttonText}>+ Add Expense</Text>
             </TouchableOpacity>
           </View>
@@ -284,20 +320,28 @@ export default function HomeScreen({ onLogout }) {
               <Text style={styles.featureText}>Investment Advice</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.featureItem}>
+            <TouchableOpacity 
+              style={styles.featureItem}
+              onPress={() => navigateToTransaction()}
+            >
               <View style={[styles.featureIcon, styles.pinkIcon]}>
                 <DollarSign size={32} color="#DB2777" />
               </View>
-              <Text style={styles.featureText}>Smart Alerts</Text>
+              <Text style={styles.featureText}>Add Transaction</Text>
             </TouchableOpacity>
           </View>
 
           {/* Recent Transactions */}
           <View style={styles.transactionsSection}>
-            <Text style={styles.sectionTitle}>Recent Transaction</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Transaction</Text>
+              <TouchableOpacity onPress={navigateToTransactionsScreen}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
             
             <View style={styles.transactionsList}>
-              <View style={styles.transactionItem}>
+              <TouchableOpacity style={styles.transactionItem}>
                 <View style={styles.transactionLeft}>
                   <View style={styles.transactionIcon}>
                     <CreditCard size={20} color="#D97706" />
@@ -308,9 +352,9 @@ export default function HomeScreen({ onLogout }) {
                   </View>
                 </View>
                 <Text style={styles.transactionAmountRed}>-$850</Text>
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.transactionItem}>
+              <TouchableOpacity style={styles.transactionItem}>
                 <View style={styles.transactionLeft}>
                   <View style={[styles.transactionIcon, styles.blueTransactionIcon]}>
                     <Text style={styles.transactionIconText}>P</Text>
@@ -321,7 +365,7 @@ export default function HomeScreen({ onLogout }) {
                   </View>
                 </View>
                 <Text style={styles.transactionAmountGreen}>+$2,500</Text>
-              </View>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -333,13 +377,16 @@ export default function HomeScreen({ onLogout }) {
           <Home size={24} color="white" />
           <Text style={styles.navText}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}>
+        <TouchableOpacity 
+          style={[styles.navItem, styles.navItemInactive]}
+          onPress={navigateToTransactionsScreen}
+        >
           <DollarSign size={24} color="white" />
-          <Text style={styles.navText}>Accounts</Text>
+          <Text style={styles.navText}>Transactions</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}>
           <Target size={24} color="white" />
-          <Text style={styles.navText}>Goals</Text>
+          <Text style={styles.navText}>Accounts</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}>
           <BarChart3 size={24} color="white" />
@@ -435,7 +482,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   incomeButton: {
-    backgroundColor: '#00B8A9',
+    backgroundColor: '#008080',
   },
   expenseButton: {
     backgroundColor: '#F87171',
@@ -446,7 +493,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   balanceCard: {
-    backgroundColor: '#00B8A9',
+    backgroundColor: '#008080',
     borderRadius: 24,
     padding: 24,
     marginBottom: 24,
@@ -569,11 +616,21 @@ const styles = StyleSheet.create({
   transactionsSection: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#1F2937',
-    marginBottom: 16,
+  },
+  viewAllText: {
+    fontSize: 14,
+    color: '#008080',
+    fontWeight: '500',
   },
   transactionsList: {
     gap: 16,
@@ -624,7 +681,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bottomNav: {
-    backgroundColor: '#00B8A9',
+    backgroundColor: '#008080',
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 16,
@@ -679,7 +736,7 @@ const styles = StyleSheet.create({
   profileImage: {
     width: 48,
     height: 48,
-    backgroundColor: '#00B8A9',
+    backgroundColor: '#008080',
     borderRadius: 24,
     overflow: 'hidden',
     marginRight: 12,
