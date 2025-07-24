@@ -12,7 +12,11 @@
       "favicon": "./assets/images/favicon.png"
     },
     "android": {
-      "package": "com.anonymous.smartspendapp"
+      "package": "com.anonymous.smartspendapp",
+      "permissions": [
+        "READ_SMS",
+        "RECEIVE_SMS"
+      ]
     },
     "ios": {
       "bundleIdentifier": "com.anonymous.smartspendapp"

@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Image,
 } from 'react-native';
 
 export default function RegisterScreen({ onRegister, onLogin, onSwitchToLogin }) {
@@ -29,6 +30,18 @@ export default function RegisterScreen({ onRegister, onLogin, onSwitchToLogin })
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+                <View style={styles.headerCenter}>
+                  <View style={styles.logo}>
+                    <Image
+                      source={require('./images/App_Logo.png')}
+                      style={styles.logoImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                  <Text style={styles.logoLabel}>SmartSpend</Text>
+                </View>
+      </View>
       <Text style={styles.title}>{isRegistering ? 'Register' : 'Login'}</Text>
 
       {isRegistering && (
@@ -80,16 +93,49 @@ export default function RegisterScreen({ onRegister, onLogin, onSwitchToLogin })
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     padding: 20,
   },
+  header: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    paddingBottom: 100,
+    borderBottomWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 20,
+    backgroundColor: 'white',
+  },
+  headerCenter: {
+    alignItems: 'center',
+  },
+  logo: {
+    width: 60,
+    height: 60,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  logoLabel: {
+    fontSize: 19,
+    fontWeight: '300',
+    color: '#374151',
+  },
   title: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 30,
-    color: '#333',
+    fontFamily: 'Roboto',
+    marginBottom: 20,
+    color: '#111827',
+    marginBottom: 30
   },
   input: {
     height: 50,

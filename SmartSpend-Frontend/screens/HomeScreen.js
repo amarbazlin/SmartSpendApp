@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import TransactionsScreenComponent from './TransactionScreen';
 import {
   View,
   Text,
   TouchableOpacity,
-  TextInput,
   StyleSheet,
   ScrollView,
   SafeAreaView,
@@ -13,50 +13,53 @@ import {
 } from 'react-native';
 import { 
   Home, 
-  Menu, 
   Wallet, 
   Target, 
   BarChart3, 
   DollarSign, 
-  TrendingUp, 
-  Search, 
-  PiggyBank, 
-  CreditCard, 
   Eye, 
   CheckCircle,
   Lock,
-  User,
   Mail,
   X,
   Bell, 
   Palette,
   Globe,
   LogOut,
-  Settings
+  MessageCircle,
+  PieChart,
+  Calculator,
+  MoreHorizontal
 } from 'lucide-react-native';
 
 // Import your Categories and Transaction components
-import Categories from './Categories'; // Adjust the path as needed
+import CategoryManager from './Categories'; // Adjust the path as needed
 import Transaction from './Transaction'; // Adjust the path as needed
-import TransactionsScreen from './TransactionScreen';
+
 import { supabase } from '../services/supabase'; // Adjust the path as needed
 const { width } = Dimensions.get('window');
 
-// Side Menu Component
-const SideMenu = ({ isOpen, onClose, onLogout }) => {
+// More Menu Component (replacing the side menu)
+const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   return (
     <Modal
       visible={isOpen}
       transparent={true}
-      animationType="slide"
+      animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.modalOverlay}>
-        {/* Menu */}
-        <View style={styles.sideMenu}>
-          <ScrollView style={styles.menuContent}>
-            {/* Header with Close Button */}
-            <View style={styles.menuHeader}>
+      <View style={styles.moreModalOverlay}>
+        <TouchableOpacity 
+          style={styles.moreBackdrop} 
+          onPress={onClose}
+          activeOpacity={1}
+        />
+        
+        {/* More Menu */}
+        <View style={styles.moreMenu}>
+          <ScrollView style={styles.moreMenuContent}>
+            {/* Header */}
+            <View style={styles.moreMenuHeader}>
               <View style={styles.profileSection}>
                 <View style={styles.profileImage}>
                   <Image
@@ -66,8 +69,8 @@ const SideMenu = ({ isOpen, onClose, onLogout }) => {
                   />
                 </View>
                 <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>John Doe</Text>
-                  <Text style={styles.profileEmail}>john@example.com</Text>
+                  <Text style={styles.profileName}>Amar Bazlin</Text>
+                  <Text style={styles.profileEmail}>aamarbazlin@gmail.com</Text>
                 </View>
               </View>
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
@@ -140,13 +143,6 @@ const SideMenu = ({ isOpen, onClose, onLogout }) => {
             </View>
           </ScrollView>
         </View>
-        
-        {/* Backdrop */}
-        <TouchableOpacity 
-          style={styles.backdrop} 
-          onPress={onClose}
-          activeOpacity={1}
-        />
       </View>
     </Modal>
   );
@@ -154,47 +150,125 @@ const SideMenu = ({ isOpen, onClose, onLogout }) => {
 
 export default function HomeScreen({ onLogout }) {
   const [currentScreen, setCurrentScreen] = useState('home');
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [transactionType, setTransactionType] = useState(null); // 'income' or 'expense'
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [transactionType, setTransactionType] = useState(null);
+  const [balanceData, setBalanceData] = useState({
+    totalBalance: 0,
+    totalExpense: 0,
+    totalIncome: 0,
+    expensePercentage: 0
+  });
+
+  // Fetch balance data from database
+  useEffect(() => {
+    fetchBalanceData();
+  }, []);
+
+  const fetchBalanceData = async () => {
+    try {
+      // Fetch all income transactions
+      const { data: incomeData, error: incomeError } = await supabase
+        .from('income')
+        .select('amount');
+
+      if (incomeError) {
+        console.error('Error fetching income:', incomeError);
+        return;
+      }
+
+      // Fetch all expense transactions
+      const { data: expenseData, error: expenseError } = await supabase
+        .from('expenses')
+        .select('amount');
+
+      if (expenseError) {
+        console.error('Error fetching expenses:', expenseError);
+        return;
+      }
+
+      // Calculate totals
+      const totalIncome = incomeData?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
+      const totalExpense = expenseData?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
+      const totalBalance = totalIncome - totalExpense;
+      const expensePercentage = totalIncome > 0 ? Math.round((totalExpense / totalIncome) * 100) : 0;
+
+      setBalanceData({
+        totalBalance,
+        totalExpense,
+        totalIncome,
+        expensePercentage
+      });
+    } catch (error) {
+      console.error('Error calculating balance:', error);
+    }
+  };
 
   const navigateToCategories = () => {
     setCurrentScreen('categories');
   };
 
   const navigateToTransaction = (type = null) => {
-    setTransactionType(type); // Set whether it's income or expense
+    setTransactionType(type);
     setCurrentScreen('transaction');
   };
 
-  // New function to navigate to TransactionsScreen
   const navigateToTransactionsScreen = () => {
     setCurrentScreen('transactionsScreen');
   };
 
   const navigateToHome = () => {
     setCurrentScreen('home');
-    setTransactionType(null); // Clear transaction type when going back to home
+    setTransactionType(null);
+    fetchBalanceData(); // Refresh balance when returning to home
   };
 
-  const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen);
+
+  const toggleMoreMenu = () => {
+    setIsMoreMenuOpen(!isMoreMenuOpen);
   };
 
-  const closeMenu = () => {
-    setIsMenuOpen(false);
+  const closeMoreMenu = () => {
+    setIsMoreMenuOpen(false);
   };
 
   const handleLogout = () => {
-    closeMenu();
+    closeMoreMenu();
     if (onLogout) {
       onLogout();
     }
   };
 
+  // Feature handlers
+  const handleChatbot = () => {
+    // Navigate to chatbot screen
+    console.log('Navigate to Chatbot');
+  };
+
+  const handleStatistics = () => {
+    // Navigate to statistics screen
+    console.log('Navigate to Statistics');
+  };
+
+  const handleBudgets = () => {
+    // Navigate to budgets screen
+    console.log('Navigate to Budgets');
+  };
+
+  // Format currency
+  const formatCurrency = (amount) => {
+    return `Rs.${amount.toLocaleString('en-LK', { minimumFractionDigits: 2 })}`;
+  };
+
   // Render Categories screen when navigated to
-  if (currentScreen === 'categories') {
-    return <Categories onBack={navigateToHome} />;
-  }
+if (currentScreen === 'categories') {
+  return (
+    <CategoryManager
+      onBack={navigateToHome}
+      onTransactions={navigateToTransactionsScreen}
+      onLogout={handleLogout}
+    />
+  );
+}
 
   // Render Transaction screen when navigated to
   if (currentScreen === 'transaction') {
@@ -202,24 +276,26 @@ export default function HomeScreen({ onLogout }) {
       <Transaction
         onBack={navigateToHome} 
         transactionType={transactionType}
-        onTransactionComplete={navigateToHome} // Optional: callback when transaction is saved
+        onTransactionComplete={navigateToHome}
       />
     );
   }
 
   // Render TransactionsScreen when navigated to
   if (currentScreen === 'transactionsScreen') {
-    return <TransactionsScreen onBack={navigateToHome} />;
-  }
+  return (
+    <TransactionsScreenComponent
+      onBack={navigateToHome}
+      onLogout={handleLogout}
+    />
+  );
+}
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        {/* Header */}
+        {/* Header - Removed menu and search */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={toggleMenu}>
-            <Menu size={24} color="#374151" />
-          </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={styles.logo}>
               <Image
@@ -229,19 +305,6 @@ export default function HomeScreen({ onLogout }) {
               />
             </View>
             <Text style={styles.logoLabel}>SmartSpend</Text>
-          </View>
-          <View style={styles.headerSpacer} />
-        </View>
-
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color="#9CA3AF" style={styles.searchIcon} />
-            <TextInput
-              placeholder="Search"
-              placeholderTextColor="#6B7280"
-              style={styles.searchInput}
-            />
           </View>
         </View>
 
@@ -262,7 +325,7 @@ export default function HomeScreen({ onLogout }) {
             </TouchableOpacity>
           </View>
 
-          {/* Balance Card */}
+          {/* Functional Balance Card */}
           <View style={styles.balanceCard}>
             <View style={styles.balanceHeader}>
               <View style={styles.balanceLeft}>
@@ -270,64 +333,65 @@ export default function HomeScreen({ onLogout }) {
                   <BarChart3 size={16} color="white" />
                   <Text style={styles.balanceLabelText}>Total Balance</Text>
                 </View>
-                <Text style={styles.balanceAmount}>$7,783.00</Text>
+                <Text style={styles.balanceAmount}>{formatCurrency(balanceData.totalBalance)}</Text>
               </View>
               <View style={styles.balanceRight}>
                 <View style={styles.expenseLabel}>
                   <Eye size={16} color="white" />
                   <Text style={styles.balanceLabelText}>Total Expense</Text>
                 </View>
-                <Text style={styles.expenseAmount}>-$1,187.40</Text>
+                <Text style={styles.expenseAmount}>-{formatCurrency(balanceData.totalExpense)}</Text>
               </View>
             </View>
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
               <View style={styles.progressBar}>
-                <View style={styles.progressFill}>
-                  <Text style={styles.progressText}>30%</Text>
+                <View style={[styles.progressFill, { width: `${Math.min(balanceData.expensePercentage, 100)}%` }]}>
+                  <Text style={styles.progressText}>{balanceData.expensePercentage}%</Text>
                 </View>
-                <Text style={styles.progressGoal}>$20,000.00</Text>
+                <Text style={styles.progressGoal}>{formatCurrency(balanceData.totalIncome)}</Text>
               </View>
             </View>
             
             <View style={styles.statusRow}>
               <CheckCircle size={16} color="white" />
-              <Text style={styles.statusText}>30% Of Your Expenses, Looks Good.</Text>
+              <Text style={styles.statusText}>
+                {balanceData.expensePercentage}% Of Your Expenses, {balanceData.expensePercentage <= 30 ? 'Looks Good' : balanceData.expensePercentage <= 70 ? 'Monitor Closely' : 'Consider Reducing'}.
+              </Text>
             </View>
           </View>
 
-          {/* Feature Shortcuts */}
-          <View style={styles.featuresGrid}>
-            <TouchableOpacity style={styles.featureItem} onPress={navigateToCategories}>
-              <View style={[styles.featureIcon, styles.greenIcon]}>
-                <BarChart3 size={32} color="#059669" />
+          {/* New Features Section */}
+          <View style={styles.newFeaturesSection}>
+            <TouchableOpacity style={styles.newFeatureItem} onPress={handleChatbot}>
+              <View style={[styles.newFeatureIcon, styles.chatbotIcon]}>
+                <MessageCircle size={28} color="#7C3AED" />
               </View>
-              <Text style={styles.featureText}>Personalized Budgeting</Text>
+              <View style={styles.newFeatureContent}>
+                <Text style={styles.newFeatureTitle}>AI Chatbot</Text>
+                <Text style={styles.newFeatureSubtitle}>Get personalized financial advice</Text>
+              </View>
             </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.featureItem}>
-              <View style={[styles.featureIcon, styles.blueIcon]}>
-                <PiggyBank size={32} color="#2563EB" />
+
+            <TouchableOpacity style={styles.newFeatureItem} onPress={handleStatistics}>
+              <View style={[styles.newFeatureIcon, styles.statisticsIcon]}>
+                <PieChart size={28} color="#059669" />
               </View>
-              <Text style={styles.featureText}>Expense Analysis</Text>
+              <View style={styles.newFeatureContent}>
+                <Text style={styles.newFeatureTitle}>Statistics</Text>
+                <Text style={styles.newFeatureSubtitle}>View detailed spending analytics</Text>
+              </View>
             </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.featureItem}>
-              <View style={[styles.featureIcon, styles.grayIcon]}>
-                <Target size={32} color="#4B5563" />
+
+            <TouchableOpacity style={styles.newFeatureItem} onPress={navigateToCategories}>
+              <View style={[styles.newFeatureIcon, styles.budgetsIcon]}>
+                <Calculator size={28} color="#DC2626" />
               </View>
-              <Text style={styles.featureText}>Investment Advice</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.featureItem}
-              onPress={() => navigateToTransaction()}
-            >
-              <View style={[styles.featureIcon, styles.pinkIcon]}>
-                <DollarSign size={32} color="#DB2777" />
+              <View style={styles.newFeatureContent}>
+                <Text style={styles.newFeatureTitle}>Budgets</Text>
+                <Text style={styles.newFeatureSubtitle}>Plan and track your spending limits</Text>
               </View>
-              <Text style={styles.featureText}>Add Transaction</Text>
             </TouchableOpacity>
           </View>
 
@@ -344,14 +408,14 @@ export default function HomeScreen({ onLogout }) {
               <TouchableOpacity style={styles.transactionItem}>
                 <View style={styles.transactionLeft}>
                   <View style={styles.transactionIcon}>
-                    <CreditCard size={20} color="#D97706" />
+                    <DollarSign size={20} color="#D97706" />
                   </View>
                   <View>
                     <Text style={styles.transactionTitle}>Deposit from account</Text>
                     <Text style={styles.transactionDate}>28 January 2021</Text>
                   </View>
                 </View>
-                <Text style={styles.transactionAmountRed}>-$850</Text>
+                <Text style={styles.transactionAmountRed}>-Rs.850</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.transactionItem}>
@@ -364,40 +428,43 @@ export default function HomeScreen({ onLogout }) {
                     <Text style={styles.transactionDate}>25 January 2021</Text>
                   </View>
                 </View>
-                <Text style={styles.transactionAmountGreen}>+$2,500</Text>
+                <Text style={styles.transactionAmountGreen}>+Rs.2,500</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </ScrollView>
 
-      {/* Bottom Navigation */}
+      {/* Updated Bottom Navigation */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem}>
           <Home size={24} color="white" />
           <Text style={styles.navText}>Home</Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.navItem, styles.navItemInactive]}
-          onPress={navigateToTransactionsScreen}
-        >
-          <DollarSign size={24} color="white" />
-          <Text style={styles.navText}>Transactions</Text>
-        </TouchableOpacity>
+            style={[styles.navItem, styles.navItemInactive]}
+            onPress={navigateToTransactionsScreen}
+          >
+            <DollarSign size={24} color="white" />
+            <Text style={styles.navText}>Transactions</Text>
+          </TouchableOpacity>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}>
-          <Target size={24} color="white" />
+          <Wallet size={24} color="white" />
           <Text style={styles.navText}>Accounts</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}>
-          <BarChart3 size={24} color="white" />
-          <Text style={styles.navText}>Stats</Text>
+        <TouchableOpacity 
+          style={[styles.navItem, styles.navItemInactive]}
+           onPress={toggleMoreMenu}
+        >
+          <MoreHorizontal size={24} color="white" />
+          <Text style={styles.navText}>More</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Side Menu */}
-      <SideMenu 
-        isOpen={isMenuOpen} 
-        onClose={closeMenu} 
+      {/* More Menu */}
+      <MoreMenu 
+        isOpen={isMoreMenuOpen} 
+        onClose={closeMoreMenu} 
         onLogout={handleLogout} 
       />
     </SafeAreaView>
@@ -413,8 +480,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
     backgroundColor: 'white',
@@ -436,33 +502,9 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   logoLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  headerSpacer: {
-    width: 24,
-  },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: 'white',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 25,
-    paddingHorizontal: 12,
-    height: 48,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    color: '#6B7280',
     fontSize: 16,
+    fontWeight: '300',
+    color: '#374151',
   },
   content: {
     flex: 1,
@@ -527,12 +569,12 @@ const styles = StyleSheet.create({
   },
   balanceAmount: {
     color: 'white',
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: 'bold',
   },
   expenseAmount: {
     color: '#FCA5A5',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
   },
   progressContainer: {
@@ -550,9 +592,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'black',
     borderRadius: 20,
     height: 40,
-    width: '30%',
     justifyContent: 'center',
     alignItems: 'center',
+    minWidth: 80,
   },
   progressText: {
     color: 'white',
@@ -575,43 +617,56 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 8,
   },
-  featuresGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  // New Features Styles
+  newFeaturesSection: {
     marginBottom: 32,
   },
-  featureItem: {
+  newFeatureItem: {
+    flexDirection: 'row',
     alignItems: 'center',
-    width: '48%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
     marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  featureIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  newFeatureIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginRight: 16,
   },
-  greenIcon: {
+  chatbotIcon: {
+    backgroundColor: '#F3E8FF',
+  },
+  statisticsIcon: {
     backgroundColor: '#DCFCE7',
   },
-  blueIcon: {
-    backgroundColor: '#DBEAFE',
+  budgetsIcon: {
+    backgroundColor: '#FEE2E2',
   },
-  grayIcon: {
-    backgroundColor: '#F3F4F6',
+  newFeatureContent: {
+    flex: 1,
   },
-  pinkIcon: {
-    backgroundColor: '#FCE7F3',
+  newFeatureTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 4,
   },
-  featureText: {
+  newFeatureSubtitle: {
     fontSize: 14,
     color: '#6B7280',
-    textAlign: 'center',
-    fontWeight: '500',
-    lineHeight: 18,
+    lineHeight: 20,
   },
   transactionsSection: {
     marginBottom: 24,
@@ -697,32 +752,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  // Side Menu Styles
-  modalOverlay: {
+  // More Menu Styles
+  moreModalOverlay: {
     flex: 1,
-    flexDirection: 'row',
-  },
-  backdrop: {
-    flex: 1,
+    justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  sideMenu: {
-    width: width * 0.8,
+  moreBackdrop: {
+    flex: 1,
+  },
+  moreMenu: {
     backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
     shadowColor: '#000',
     shadowOffset: {
-      width: 2,
-      height: 0,
+      width: 0,
+      height: -2,
     },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  menuContent: {
-    flex: 1,
+  moreMenuContent: {
     padding: 24,
   },
-  menuHeader: {
+  moreMenuHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
