@@ -13,6 +13,7 @@ import {
   ScrollView,
   Image,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { VictoryPie } from 'victory-native';
 import { supabase } from '../services/supabase';
@@ -29,7 +30,39 @@ import {
   Lock,
 } from 'lucide-react-native';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 const formatCurrency = (v = 0) => `Rs. ${Number(v).toFixed(2)}`;
+
+/** -------- fallback palette in the same “warm / vivid” vibe -------- */
+const FALLBACK_PALETTE = [
+  '#F87171', // red-400
+  '#FB923C', // orange-400
+  '#FBBF24', // amber-400
+  '#4ADE80', // green-400
+  '#34D399', // teal-400
+  '#60A5FA', // blue-400
+  '#A78BFA', // violet-400
+  '#F472B6', // pink-400
+  '#22D3EE', // cyan-400
+  '#FACC15', // yellow-400
+  '#2DD4BF', // teal-300
+  '#FB7185', // rose-400
+];
+
+/** Convert #RRGGBB to rgba(r,g,b,alpha) string */
+function hexToRgba(hex, alpha = 1) {
+  if (!hex || typeof hex !== 'string') return `rgba(0,0,0,${alpha})`;
+  let h = hex.replace('#', '');
+  if (h.length === 3) {
+    h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  }
+  const int = parseInt(h, 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 // ─────────────────────  OPTIONAL: same More menu UI you used  ─────────────────────
 const MoreMenu = ({ isOpen, onClose, onLogout }) => (
@@ -44,79 +77,79 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => (
       <View style={styles.moreMenu}>
         <ScrollView style={styles.moreMenuContent}>
           <View style={styles.moreMenuHeader}>
-          <View style={styles.profileSection}>
-            <View style={styles.profileImage}>
-              <Image
-                source={require('./images/App_Logo.png')}
-                style={styles.profileImageContent}
-                resizeMode="cover"
-              />
+            <View style={styles.profileSection}>
+              <View style={styles.profileImage}>
+                <Image
+                  source={require('./images/App_Logo.png')}
+                  style={styles.profileImageContent}
+                  resizeMode="cover"
+                />
+              </View>
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>Amar Bazlin</Text>
+                <Text style={styles.profileEmail}>aamarbazlin.com</Text>
+              </View>
             </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>Amar Bazlin</Text>
-              <Text style={styles.profileEmail}>aamarbazlin.com</Text>
-            </View>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <X size={20} color="#6B7280" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <X size={20} color="#6B7280" />
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.menuItems}>
-          <TouchableOpacity style={styles.menuItem}>
-            <Lock size={20} color="#6B7280" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemTitle}>Passcode</Text>
-              <Text style={styles.menuItemSubtitle}>OFF</Text>
-            </View>
-          </TouchableOpacity>
+          <View style={styles.menuItems}>
+            <TouchableOpacity style={styles.menuItem}>
+              <Lock size={20} color="#6B7280" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.menuItemTitle}>Passcode</Text>
+                <Text style={styles.menuItemSubtitle}>OFF</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
-            <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
-              <Text style={styles.menuItemSubtitle}>LKR (Rs.)</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem}>
+              <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
+                <Text style={styles.menuItemSubtitle}>LKR (Rs.)</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
-            <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem}>
+              <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
-            <Bell size={20} color="#6B7280" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemTitle}>Alarm Setting</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem}>
+              <Bell size={20} color="#6B7280" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.menuItemTitle}>Alarm Setting</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
-            <Palette size={20} color="#6B7280" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemTitle}>Style</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem}>
+              <Palette size={20} color="#6B7280" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.menuItemTitle}>Style</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
-            <Globe size={20} color="#6B7280" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemTitle}>Language Setting</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem}>
+              <Globe size={20} color="#6B7280" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.menuItemTitle}>Language Setting</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.menuItem, styles.logoutItem]}
-            onPress={onLogout}
-          >
-            <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
-            <View style={styles.menuItemContent}>
-              <Text style={styles.logoutText}>Logout</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={[styles.menuItem, styles.logoutItem]}
+              onPress={onLogout}
+            >
+              <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
+              <View style={styles.menuItemContent}>
+                <Text style={styles.logoutText}>Logout</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </View>
     </View>
@@ -145,15 +178,16 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
           return;
         }
 
-        // same query style you used
+        // Fetch categories (with user-specific & global) + include color/icon
         const { data: allCategories, error: catError } = await supabase
           .from('categories')
-          .select('*')
+          .select('id, name, icon, color, limit_')
           .or(`user_id.is.null,user_id.eq.${user.id}`)
           .order('id', { ascending: false });
 
         if (catError) throw catError;
 
+        // Fetch user expenses
         const { data: expenses, error: expenseErr } = await supabase
           .from('expenses')
           .select('category_id, amount')
@@ -163,7 +197,7 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
 
         const spentMap = {};
         (expenses || []).forEach(exp => {
-          spentMap[exp.category_id] = (spentMap[exp.category_id] || 0) + exp.amount;
+          spentMap[exp.category_id] = (spentMap[exp.category_id] || 0) + Number(exp.amount || 0);
         });
 
         const enriched = (allCategories || []).map(cat => ({
@@ -181,16 +215,20 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
     })();
   }, []);
 
-  // derive percentages + pie data
+  // derive data for chart + list
   const { totalSpent, listData, chartData, colorScale } = useMemo(() => {
     const total = categories.reduce((sum, c) => sum + (c.spent || 0), 0);
 
     const withPct = categories
       .filter(c => (c.spent || 0) > 0)
-      .map(c => ({
-        ...c,
-        percent: total === 0 ? 0 : ((c.spent || 0) / total) * 100,
-      }))
+      .map((c, idx) => {
+        const color = c.color || FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
+        return {
+          ...c,
+          color,
+          percent: total === 0 ? 0 : ((c.spent || 0) / total) * 100,
+        };
+      })
       .sort((a, b) => b.percent - a.percent);
 
     const data = withPct.map(c => ({
@@ -198,14 +236,14 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
       y: c.spent || 0,
       percent: c.percent,
       emoji: c.icon,
-      color: c.color || '#F87171',
+      color: c.color,
     }));
 
     return {
       totalSpent: total,
       listData: withPct,
       chartData: data,
-      colorScale: data.map(d => d.color),
+      colorScale: withPct.map(d => d.color),
     };
   }, [categories]);
 
@@ -240,6 +278,9 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
             colorScale={colorScale}
             innerRadius={0}
             padAngle={2}
+            animate={{ duration: 500 }}
+            width={SCREEN_WIDTH}
+            height={SCREEN_WIDTH * 0.75}
             labels={({ datum }) =>
               `${datum.emoji ? `${datum.emoji} ` : ''}${datum.x}\n${datum.percent.toFixed(1)} %`
             }
@@ -256,10 +297,14 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
         data={listData}
         keyExtractor={item => item.id?.toString() ?? item.name}
         contentContainerStyle={styles.listContainer}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          const bg = hexToRgba(item.color, 0.15);
+          return (
           <View style={styles.row}>
-            <View style={[styles.badge, { backgroundColor: item.color || '#F87171' }]}>
-              <Text style={styles.badgeText}>{Math.round(item.percent)}%</Text>
+            <View style={[styles.badge, { backgroundColor: bg }]}>
+              <Text style={[styles.badgeText, { color: item.color }]}>
+                {Math.round(item.percent)}%
+              </Text>
             </View>
 
             <Text style={styles.name}>
@@ -268,7 +313,7 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
 
             <Text style={styles.amount}>{formatCurrency(item.spent || 0)}</Text>
           </View>
-        )}
+        )}}
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={styles.muted}>No categories with spending.</Text>
@@ -276,7 +321,7 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
         }
       />
 
-      {/* Bottom Nav (same look & callbacks as your Categories.js) */}
+      {/* Bottom Nav */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]} onPress={onBack}>
           <Home size={24} color="white" />
@@ -365,7 +410,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 10,
   },
-  badgeText: { color: '#fff', fontWeight: '600' },
+  badgeText: { fontWeight: '600' },
   name: { flex: 1, fontSize: 16, fontWeight: '600', color: '#1F2937' },
   amount: { fontSize: 15, fontWeight: '600', color: '#374151' },
 
@@ -385,9 +430,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  moreBackdrop: {
-    flex: 1,
-  },
+  moreBackdrop: { flex: 1 },
   moreMenu: {
     backgroundColor: 'white',
     borderTopLeftRadius: 20,
@@ -415,10 +458,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginRight: 12,
   },
-  profileImageContent: {
-    width: '100%',
-    height: '100%',
-  },
+  profileImageContent: { width: '100%', height: '100%' },
   profileInfo: { flex: 1 },
   profileName: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
   profileEmail: { fontSize: 14, color: '#6B7280' },

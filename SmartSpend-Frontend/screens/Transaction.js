@@ -36,6 +36,7 @@ const TransactionForm = ({
     year: '2-digit',
     weekday: 'short' 
   }));
+  const [pickedCategory, setPickedCategory] = useState(null); 
   const [categories, setCategories] = useState({ income: [], expense: [] });
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
 const [user, setUser] = useState(null);
@@ -303,7 +304,8 @@ const handleSave = async () => {
       type: selectedTab,
       date: new Date().toISOString().split('T')[0],
       amount: parseFloat(amount),
-      category_id: selectedCategoryId,
+      category: category,               // Add the category name
+      category_id: selectedCategoryId,  // Keep the category ID
       account,
       note,
       description,
@@ -316,6 +318,7 @@ const handleSave = async () => {
 };
 
 
+
   const handleContinue = async () => {
   if (!validateForm()) return;
 
@@ -326,38 +329,83 @@ const handleSave = async () => {
       return;
     }
 
-    const allCategories = [...categories.income, ...categories.expense];
-    const selectedCategory = allCategories.find(c => c.id === category_id);
-    const category_id = selectedCategory ? selectedCategory.id : null;
+    const amt = parseFloat(amount);
 
-    if (!category_id) {
-      Alert.alert('Error', 'Category ID not found');
-      return;
+    if (selectedTab === 'income') {
+      // Insert to income table
+      const { error } = await supabase
+        .from('income')
+        .insert([{
+          user_id: user.id,
+          source: category || 'Other',
+          amount: amt,
+          date: new Date().toISOString().slice(0, 10),
+          note: note || null,
+        }]);
+
+      if (error) throw error;
+
+      // Let the parent know (so it can mirror to transactions / refresh UI)
+      onTransactionComplete?.({
+        type: 'income',
+        date: new Date().toISOString().split('T')[0],
+        amount: amt,
+        category,                // name shown in UI
+        category_id: null,       // income doesn’t use it
+        account,
+        note,
+        description,
+      });
+
+    } else {
+      // EXPENSE
+      if (!selectedCategoryId) {
+        Alert.alert('Error', 'Please pick a category');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('expenses')
+        .insert([{
+          user_id: user.id,
+          category_id: selectedCategoryId,     // <-- use the state!
+          amount: amt,
+          payment_method: account || 'Cash',
+          note: note || '',
+          description: description || null,
+          date: new Date().toISOString().slice(0, 10),
+        }]);
+
+      if (error) throw error;
+
+      // Notify parent
+      onTransactionComplete?.({
+        type: 'expense',
+        date: new Date().toISOString().split('T')[0],
+        amount: amt,
+        category,                 // name (used to render list)
+        category_id: selectedCategoryId, // uuid (used to join)
+        account,
+        note,
+        description,
+      });
     }
 
-    const { error } = await supabase
-      .from('expenses')
-      .insert([{
-        user_id: user.id,
-        amount: parseFloat(amount),
-        category_id: category_id,
-        payment_method: account,
-        date: new Date().toISOString().split('T')[0],
-        note: note || ''
-      }]);
-
-    if (error) throw error;
-
     Alert.alert('Saved', 'Transaction added. Add another one.');
-    
+
+    // Reset only the fields you want to clear for the "continue" flow
     setAmount('');
     setNote('');
     setDescription('');
+    setCategory('');
+    setSelectedCategoryId(null);
+
   } catch (e) {
     console.error('Continue error:', e);
     Alert.alert('Error', e.message || 'Failed to save transaction.');
   }
 };
+
 
 
   const getTabStyle = (tabType) => {
@@ -523,6 +571,7 @@ const handleSave = async () => {
                     style={styles.pickerItemButton}
                     onPress={() => {
                       setCategory(cat.name);
+                      setSelectedCategoryId(cat.id);    // <- store the uuid
                       setShowCategoryPicker(false);
                     }}
                   >

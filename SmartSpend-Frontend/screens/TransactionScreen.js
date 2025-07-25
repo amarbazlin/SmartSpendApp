@@ -301,21 +301,25 @@ const readBankMessages = useCallback(async () => {
   };
 
   const fetchTransactions = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .order('created_at', { ascending: false });
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
 
-      if (error) throw error;
-      
-      setTransactions(data || []);
-      calculateTotals(data || []);
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      Alert.alert('Error', 'Failed to fetch transactions');
-    }
-  };
+    const { data, error } = await supabase
+      .from('transactions')  // <-- the VIEW
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    setTransactions(data || []);
+    calculateTotals(data || []);
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+    Alert.alert('Error', 'Failed to fetch transactions');
+  }
+};
+
 
   const calculateTotals = (transactionData) => {
     const totalIncome = transactionData
@@ -366,35 +370,69 @@ const readBankMessages = useCallback(async () => {
     setMonthlyData(monthlyStats);
   };
 
-  const handleTransactionAdded = async (transactionData) => {
-    try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .insert([{
-          type: transactionData.type,
-          category: transactionData.category,
-          amount: parseFloat(transactionData.amount),
-          description: transactionData.description || transactionData.note,
-          payment_method: transactionData.account || 'Cash',
-          date: new Date().toISOString().split('T')[0],
-          created_at: new Date().toISOString(),
-        }])
-        .select();
+  const handleTransactionAdded = async (t) => {
+  try {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      Alert.alert('Error', 'No user session');
+      return;
+    }
 
+    const amt = Number(t.amount);
+
+    if (t.type === 'income') {
+      // write to income
+      const { error } = await supabase
+        .from('income')
+        .insert([{
+          user_id: user.id,
+          source: t.category || 'Other',
+          amount: amt,
+          date: new Date().toISOString().slice(0, 10),
+          note: t.note || null,
+        }]);
       if (error) throw error;
 
-      // Update local state
-      const newTransactions = [data[0], ...transactions];
-      setTransactions(newTransactions);
-      calculateTotals(newTransactions);
-      
-      setShowTransactionForm(false);
-      Alert.alert('Success', 'Transaction added successfully');
-    } catch (error) {
-      console.error('Error adding transaction:', error);
-      Alert.alert('Error', 'Failed to add transaction');
+    } else {
+      // write to expenses (MUST pass category_id)
+      let catId = t.category_id;
+
+      // safety net: if you only got the name, resolve the id
+      if (!catId && t.category) {
+        const { data: catRow, error: catErr } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('name', t.category)
+          .maybeSingle();
+        if (catErr) throw catErr;
+        catId = catRow?.id ?? null;
+      }
+
+      const { error } = await supabase
+        .from('expenses')
+        .insert([{
+          user_id: user.id,
+          category_id: catId,                       // <<<<<<<<<< IMPORTANT
+          amount: amt,
+          payment_method: t.account || 'Cash',
+          note: t.note || null,
+          description: t.description || null,
+          date: new Date().toISOString().slice(0, 10),
+        }]);
+      if (error) throw error;
     }
-  };
+
+    // You’re mirroring to `transactions` via the trigger, so just refetch
+    await fetchTransactions();
+
+    setShowTransactionForm(false);
+    Alert.alert('Success', 'Transaction added successfully');
+  } catch (error) {
+    console.error('Error adding transaction:', error);
+    Alert.alert('Error', error.message || 'Failed to add transaction');
+  }
+};
+
 
   // Function to get emoji for category from database
   const getCategoryEmoji = (categoryName) => {
