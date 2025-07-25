@@ -171,6 +171,7 @@ const Icon = ({ name, size = 24, color = '#000' }) => {
 const { width: screenWidth } = Dimensions.get('window');
 
 const CategoryManager = ({onBack, onLogout, onTransactions}) => {
+  const [userId, setUserId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [currentScreen, setCurrentScreen] = useState('categories');
   const [loading, setLoading] = useState(true);
@@ -200,8 +201,47 @@ const CategoryManager = ({onBack, onLogout, onTransactions}) => {
 
   // Simulate API call to fetch categories
   useEffect(() => {
-    fetchCategories();
-  }, []);
+  (async () => {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
+      Alert.alert("Error", "Unable to fetch user session");
+      return;
+    }
+    setUserId(user.id);
+    await fetchCategories();
+  })();
+}, []);
+useEffect(() => {
+  if (!userId) return;
+
+  const channel = supabase
+    .channel('expenses-realtime')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'expenses',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        const { category, amount } = payload.new;
+
+        setCategories(prev =>
+          prev.map(c =>
+            c.name === category
+              ? { ...c, spent: (c.spent || 0) + Number(amount) }
+              : c
+          )
+        );
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [userId]);
 
   const fetchCategories = async () => {
     setLoading(true);
@@ -297,75 +337,57 @@ const CategoryManager = ({onBack, onLogout, onTransactions}) => {
   };
 
   const saveCategory = async () => {
-    if (!formData.name || !formData.limit) {
-      Alert.alert('Error', 'Please fill in all required fields');
-      return;
-    }
+  if (!formData.name || !formData.limit) {
+    Alert.alert('Error', 'Please fill in all required fields');
+    return;
+  }
 
-    const {
-      data: { user },
-      error
-    } = await supabase.auth.getUser();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) {
+    Alert.alert("Error", "User session expired.");
+    return;
+  }
 
-    if (error || !user) {
-      Alert.alert("Error", "User session expired.");
-      return;
-    }
+  const parsedLimit = parseFloat(formData.limit);
+  if (isNaN(parsedLimit) || parsedLimit < 0) {
+    Alert.alert("Error", "Please enter a valid positive number for limit.");
+    return;
+  }
 
-    // ✅ Prevent duplicate category names
-    const nameExists = categories.some(c =>
-      c.name.toLowerCase() === formData.name.toLowerCase() &&
-      (!editingCategory || c.id !== editingCategory.id)
-    );
-
-    if (nameExists) {
-      Alert.alert("Error", "Category with this name already exists.");
-      return;
-    }
-
-    // ✅ Convert string limit to float (handle empty or invalid values)
-    const parsedLimit = parseFloat(formData.limit);
-    if (isNaN(parsedLimit) || parsedLimit < 0) {
-      Alert.alert("Error", "Please enter a valid positive number for limit.");
-      return;
-    }
-
-    const categoryData = {
-      name: formData.name.trim(),
-      icon: formData.icon,
-      limit_: parsedLimit,
-      color: formData.color,
-      user_id: user.id,
-    };
-
-    try {
-      if (editingCategory && editingCategory.id) {
-        const { error } = await supabase
-          .from('categories')
-          .update(categoryData)
-          .eq('id', editingCategory.id);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('categories')
-          .insert([categoryData]);
-
-        if (error) throw error;
-      }
-
-      await fetchCategories(); // Refresh after save
-
-      // Reset form and modal
-      setShowEditModal(false);
-      setShowAddModal(false);
-      setEditingCategory(null);
-      setFormData({ name: '', icon: '📦', limit: '', color: '#E8E8E8' });
-      setSearchTerm('');
-    } catch (e) {
-      Alert.alert("Save Error", e.message || "Failed to save category.");
-    }
+  const categoryData = {
+    name: formData.name.trim(),
+    icon: formData.icon,
+    limit_: parsedLimit,
+    color: formData.color,
+    user_id: user.id,
+    type: 'expense', // default new categories to expense
   };
+
+  try {
+    if (editingCategory && editingCategory.id) {
+      const { error } = await supabase
+        .from('categories')
+        .update(categoryData)
+        .eq('id', editingCategory.id);
+
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('categories')
+        .insert([categoryData]);
+
+      if (error) throw error;
+    }
+
+    await fetchCategories();
+    setShowEditModal(false);
+    setShowAddModal(false);
+    setEditingCategory(null);
+    setFormData({ name: '', icon: '📦', limit: '', color: '#E8E8E8' });
+  } catch (e) {
+    Alert.alert("Save Error", e.message || "Failed to save category.");
+  }
+};
 
   const confirmDelete = async () => {
     try {

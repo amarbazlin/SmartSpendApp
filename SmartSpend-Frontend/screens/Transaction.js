@@ -36,6 +36,9 @@ const TransactionForm = ({
     year: '2-digit',
     weekday: 'short' 
   }));
+  const [categories, setCategories] = useState({ income: [], expense: [] });
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+const [user, setUser] = useState(null);
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [account, setAccount] = useState('Cash');
@@ -47,31 +50,7 @@ const TransactionForm = ({
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newAccountName, setNewAccountName] = useState('');
-  const [categories, setCategories] = useState({
-    income: [
-      { name: 'Salary', emoji: '💼' },
-      { name: 'Freelance', emoji: '💻' },
-      { name: 'Business', emoji: '🏢' },
-      { name: 'Investment', emoji: '📈' },
-      { name: 'Gift', emoji: '🎁' },
-      { name: 'Bonus', emoji: '💰' },
-      { name: 'Other Income', emoji: '💵' }
-    ],
-    expense: [
-      { name: 'Food', emoji: '🍜' },
-      { name: 'Transport', emoji: '🚕' },
-      { name: 'Social Life', emoji: '🎭' },
-      { name: 'Pets', emoji: '🐶' },
-      { name: 'Culture', emoji: '🖼️' },
-      { name: 'Household', emoji: '🏠' },
-      { name: 'Apparel', emoji: '👕' },
-      { name: 'Beauty', emoji: '💄' },
-      { name: 'Health', emoji: '🩺' },
-      { name: 'Education', emoji: '📚' },
-      { name: 'Gift', emoji: '🎁' },
-      { name: 'Other', emoji: '📝' }
-    ]
-  });
+  
 
   const [accounts, setAccounts] = useState([
     { name: 'Cash', emoji: '💵' },
@@ -80,39 +59,64 @@ const TransactionForm = ({
     { name: 'Card', emoji: '💳' }
   ]);
 
-  // Load categories and accounts from Supabase on component mount
-  useEffect(() => {
-    loadCategoriesFromSupabase();
-    loadAccountsFromSupabase();
-  }, []);
+ useEffect(() => {
+  (async () => {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
+      console.error('No user session', error);
+      return;
+    }
+    setUser(user);
+
+    await loadCategoriesFromSupabase(user);
+    await loadAccountsFromSupabase(user);
+  })();
+}, []);
 
   const loadCategoriesFromSupabase = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*');
-      
-      if (error) throw error;
-      
-      if (data && data.length > 0) {
-        const incomeCategories = data.filter(cat => cat.type === 'income');
-        const expenseCategories = data.filter(cat => cat.type === 'expense');
-        
-        setCategories({
-          income: incomeCategories.map(cat => ({
-            name: cat.name,
-            emoji: '📝' // Use default emoji since column might not exist
-          })),
-          expense: expenseCategories.map(cat => ({
-            name: cat.name,
-            emoji: '📝' // Use default emoji since column might not exist
-          }))
-        });
-      }
-    } catch (error) {
-      console.error('Error loading categories:', error);
+  try {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      console.error('No user session', userErr);
+      return;
     }
-  };
+
+    const { data, error } = await supabase
+      .from('categories')
+      .select('id, name, icon, type, user_id')
+      .or(`user_id.is.null,user_id.eq.${user.id}`);
+
+    if (error) throw error;
+
+    console.log('Fetched categories:', data);
+
+    // Separate categories
+    const incomeCategories = data
+      .filter(c => c.type === 'income')
+      .map(c => ({
+        id: c.id,
+        name: c.name,
+        emoji: c.icon || '📝',
+      }));
+
+    const expenseCategories = data
+      .filter(c => c.type === 'expense' || c.type == null)
+      .map(c => ({
+        id: c.id,
+        name: c.name,
+        emoji: c.icon || '📝',
+      }));
+
+    setCategories({
+      income: incomeCategories,
+      expense: expenseCategories,
+    });
+
+  } catch (e) {
+    console.error('Error loading categories:', e);
+  }
+};
+
 
   const loadAccountsFromSupabase = async () => {
     try {
@@ -250,53 +254,111 @@ const TransactionForm = ({
     return true;
   };
 
-  const handleSave = () => {
-    if (!validateForm()) {
-      return;
-    }
-    
-    const transactionData = {
-      type: selectedTab,
-      date: new Date().toISOString().split('T')[0],
-      amount: parseFloat(amount),
-      category: category,
-      account: account,
-      note: note,
-      description: description,
-    };
-    
-    console.log('Saving transaction:', transactionData);
-    
-    if (onTransactionComplete && typeof onTransactionComplete === 'function') {
-      onTransactionComplete(transactionData);
-    }
-    
-    resetForm();
-  };
+ const persistTransaction = async () => {
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
 
-  const handleContinue = () => {
-    if (!validateForm()) {
-      return;
-    }
-    
-    const transactionData = {
+  if (userErr || !user) throw new Error('No user session');
+
+  const amt = parseFloat(amount);
+
+  if (selectedTab === 'income') {
+    // your income table columns: id, user_id, source, amount, date, note
+    const { error } = await supabase.from('income').insert([
+      {
+        user_id: user.id,
+        source: category_id || 'Other',                   // <- map category to "source"
+        amount: amt,
+        date: new Date().toISOString().slice(0, 10),   // since column type is DATE
+        note: note || null,
+      },
+    ]);
+    if (error) throw error;
+  } else {
+    // expense flow (adjust column names to match your expenses table)
+    const { error } = await supabase.from('expenses').insert([
+      {
+        user_id: user.id,
+        
+        date: new Date().toISOString().slice(0, 10),
+        amount: amt,
+        category_id: selectedCategoryId,
+        account,
+        note: note || null,
+        description: description || null,
+      },
+    ]);
+    if (error) throw error;
+  }
+};
+
+const handleSave = async () => {
+  if (!validateForm()) return;
+  try {
+    await persistTransaction();
+    Alert.alert('Success', 'Transaction saved');
+    onTransactionComplete?.({
       type: selectedTab,
       date: new Date().toISOString().split('T')[0],
       amount: parseFloat(amount),
-      category: category,
-      account: account,
-      note: note,
-      description: description,
-    };
-    
-    console.log('Continuing with transaction:', transactionData);
-    
-    if (onTransactionComplete && typeof onTransactionComplete === 'function') {
-      onTransactionComplete(transactionData);
-    }
-    
+      category_id: selectedCategoryId,
+      account,
+      note,
+      description,
+    });
     resetForm();
-  };
+  } catch (e) {
+    console.error(e);
+    Alert.alert('Error', e.message || 'Failed to save transaction');
+  }
+};
+
+
+  const handleContinue = async () => {
+  if (!validateForm()) return;
+
+  try {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      Alert.alert('Error', 'User session expired.');
+      return;
+    }
+
+    const allCategories = [...categories.income, ...categories.expense];
+    const selectedCategory = allCategories.find(c => c.id === category_id);
+    const category_id = selectedCategory ? selectedCategory.id : null;
+
+    if (!category_id) {
+      Alert.alert('Error', 'Category ID not found');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('expenses')
+      .insert([{
+        user_id: user.id,
+        amount: parseFloat(amount),
+        category_id: category_id,
+        payment_method: account,
+        date: new Date().toISOString().split('T')[0],
+        note: note || ''
+      }]);
+
+    if (error) throw error;
+
+    Alert.alert('Saved', 'Transaction added. Add another one.');
+    
+    setAmount('');
+    setNote('');
+    setDescription('');
+  } catch (e) {
+    console.error('Continue error:', e);
+    Alert.alert('Error', e.message || 'Failed to save transaction.');
+  }
+};
+
 
   const getTabStyle = (tabType) => {
     if (tabType === selectedTab) {

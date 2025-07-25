@@ -37,6 +37,7 @@ import CategoryManager from './Categories'; // Adjust the path as needed
 import Transaction from './Transaction'; // Adjust the path as needed
 
 import { supabase } from '../services/supabase'; // Adjust the path as needed
+import ChartsScreen from './Charts';
 const { width } = Dimensions.get('window');
 
 // More Menu Component (replacing the side menu)
@@ -206,6 +207,9 @@ export default function HomeScreen({ onLogout }) {
   const navigateToCategories = () => {
     setCurrentScreen('categories');
   };
+   const navigateToCharts = () => {
+    setCurrentScreen('charts');
+  };
 
   const navigateToTransaction = (type = null) => {
     setTransactionType(type);
@@ -263,6 +267,15 @@ export default function HomeScreen({ onLogout }) {
 if (currentScreen === 'categories') {
   return (
     <CategoryManager
+      onBack={navigateToHome}
+      onTransactions={navigateToTransactionsScreen}
+      onLogout={handleLogout}
+    />
+  );
+}
+if (currentScreen === 'charts') {
+  return (
+    <ChartsScreen
       onBack={navigateToHome}
       onTransactions={navigateToTransactionsScreen}
       onLogout={handleLogout}
@@ -374,7 +387,7 @@ if (currentScreen === 'categories') {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.newFeatureItem} onPress={handleStatistics}>
+            <TouchableOpacity style={styles.newFeatureItem} onPress={navigateToCharts}>
               <View style={[styles.newFeatureIcon, styles.statisticsIcon]}>
                 <PieChart size={28} color="#059669" />
               </View>
