@@ -191,10 +191,7 @@ export default function TransactionsScreenComponent({ onBack, onLogout }) {
 }, [readBankMessages]);
 
 const readBankMessages = useCallback(async () => {
-  if (!SmsAndroid || typeof SmsAndroid.list !== 'function') {
-  Alert.alert('SMS module not available', 'Are you running in Expo Go? Use npx expo run:android');
-  return;
-}
+  
   console.log('[SMS] Starting to read bank messages…');
 
   // Fast duplicate check (by full SMS body you store in `description`)

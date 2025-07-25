@@ -1,25 +1,38 @@
 {
-  "android": {
-    "package": "com.anonymous.smartspendapp"
-  },
-  "ios": {
-    "bundleIdentifier": "com.anonymous.smartspendapp"
-  },
   "expo": {
+    "name": "SmartSpendApp",
+    "slug": "SmartSpendApp",
+    "version": "1.0.0",
+    "sdkVersion": "51.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "web": {
       "output": "static",
-      "bundler": "metro",
-      "favicon": "./assets/images/favicon.png"
+      "bundler": "metro"
     },
-    "android": {
-      "package": "com.anonymous.smartspendapp",
-      "permissions": [
-        "READ_SMS",
-        "RECEIVE_SMS"
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0"
+          },
+          "ios": {
+            "deploymentTarget": "13.4"
+          }
+        }
       ]
-    },
-    "ios": {
-      "bundleIdentifier": "com.anonymous.smartspendapp"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "your-project-id-here"
+      }
     }
   }
 }
+

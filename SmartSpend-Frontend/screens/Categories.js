@@ -646,7 +646,9 @@ const toggleMoreMenu = () => {
       </TouchableOpacity>
 
        <View style={styles.bottomNav}>
-        <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}
+        <TouchableOpacity style={[styles.navItem, styles.navItemInactive
+          
+        ]}
         onPress={onBack} >
           <Home size={24} color="white" />
           <Text style={styles.navText}>Home</Text>
