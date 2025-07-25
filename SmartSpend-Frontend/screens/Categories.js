@@ -67,8 +67,8 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                   />
                 </View>
                 <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>John Doe</Text>
-                  <Text style={styles.profileEmail}>john@example.com</Text>
+                  <Text style={styles.profileName}>Amar Bazlin</Text>
+                  <Text style={styles.profileEmail}>aamarbazl.com</Text>
                 </View>
               </View>
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
@@ -204,64 +204,65 @@ const CategoryManager = ({onBack, onLogout, onTransactions}) => {
   }, []);
 
   const fetchCategories = async () => {
-  setLoading(true);
+    setLoading(true);
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-  if (userError || !user) {
-    Alert.alert("Error", "Unable to fetch user session");
+    if (userError || !user) {
+      Alert.alert("Error", "Unable to fetch user session");
+      setLoading(false);
+      return;
+    }
+
+    const { data: allCategories, error: catError } = await supabase
+      .from('categories')
+      .select('*')
+      .or(`user_id.is.null,user_id.eq.${user.id}`)
+      .order('id', { ascending: false }); // ✅ Order by ID descending (newest first)
+
+    if (catError) {
+      Alert.alert("Error fetching categories", catError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: expenses, error: expenseErr } = await supabase
+      .from('expenses')
+      .select('category, amount')
+      .eq('user_id', user.id);
+
+    const spentMap = {};
+    if (expenses) {
+      expenses.forEach(exp => {
+        spentMap[exp.category] = (spentMap[exp.category] || 0) + exp.amount;
+      });
+    }
+
+    const enriched = allCategories.map(cat => ({
+      ...cat,
+      spent: spentMap[cat.name] || 0,
+      limit: cat.limit_ || 0 // ✅ Map from correct column
+    }));
+
+    setCategories(enriched);
     setLoading(false);
-    return;
-  }
+  };
 
-  const { data: allCategories, error: catError } = await supabase
-    .from('categories')
-    .select('*')
-    .or(`user_id.is.null,user_id.eq.${user.id}`);
-
-  if (catError) {
-    Alert.alert("Error fetching categories", catError.message);
-    setLoading(false);
-    return;
-  }
-
-  const { data: expenses, error: expenseErr } = await supabase
-    .from('expenses')
-    .select('category, amount')
-    .eq('user_id', user.id);
-
-  const spentMap = {};
-  if (expenses) {
-    expenses.forEach(exp => {
-      spentMap[exp.category] = (spentMap[exp.category] || 0) + exp.amount;
+  const handleEdit = (category) => {
+    setEditingCategory(category); // ✅ sets the exact item to be updated
+    setFormData({
+      name: category.name,
+      icon: category.icon,
+      limit: category.limit.toString(), // from derived limit
+      color: category.color,
     });
-  }
+    setShowEditModal(true);
+  };
 
-  const enriched = allCategories.map(cat => ({
-    ...cat,
-    spent: spentMap[cat.name] || 0,
-    limit: cat.limit_ || 0 // ✅ Map from correct column
-  }));
-
-  setCategories(enriched);
-  setLoading(false);
-};
-
-
- const handleEdit = (category) => {
-  setEditingCategory(category); // ✅ sets the exact item to be updated
-  setFormData({
-    name: category.name,
-    icon: category.icon,
-    limit: category.limit.toString(), // from derived limit
-    color: category.color,
-  });
-  setShowEditModal(true);
-};
-const toggleMoreMenu = () => {
+  const toggleMoreMenu = () => {
     setIsMoreMenuOpen(!isMoreMenuOpen);
   };
 
@@ -275,7 +276,8 @@ const toggleMoreMenu = () => {
       onLogout();
     }
   };
-   const navigateToTransactionsScreen = () => {
+
+  const navigateToTransactionsScreen = () => {
     setCurrentScreen('transactionsScreen');
   };
 
@@ -295,100 +297,92 @@ const toggleMoreMenu = () => {
   };
 
   const saveCategory = async () => {
-  if (!formData.name || !formData.limit) {
-    Alert.alert('Error', 'Please fill in all required fields');
-    return;
-  }
-
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser();
-
-  if (error || !user) {
-    Alert.alert("Error", "User session expired.");
-    return;
-  }
-
-  // Optional: prevent duplicate category names
-  const nameExists = categories.some(c =>
-    c.name.toLowerCase() === formData.name.toLowerCase() &&
-    (!editingCategory || c.id !== editingCategory.id)
-  );
-
-  if (nameExists) {
-    Alert.alert("Error", "Category with this name already exists.");
-    return;
-  }
-
-  // ✅ Convert string limit to float (handle empty or invalid values)
-  const parsedLimit = parseFloat(formData.limit);
-  if (isNaN(parsedLimit)) {
-    Alert.alert("Error", "Please enter a valid number for limit.");
-    return;
-  }
-
-  const categoryData = {
-    name: formData.name,
-    icon: formData.icon,
-    limit_: parsedLimit,
-    color: formData.color,
-    user_id: user.id,
-  };
-
-  try {
-    if (editingCategory && editingCategory.id) {
-      const { error } = await supabase
-        .from('categories')
-        .update(categoryData)
-        .eq('id', editingCategory.id);
-
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from('categories')
-        .insert([categoryData]);
-
-      if (error) throw error;
+    if (!formData.name || !formData.limit) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
     }
 
-    await fetchCategories(); // Refresh after save
+    const {
+      data: { user },
+      error
+    } = await supabase.auth.getUser();
 
-    // Reset form and modal
-    setShowEditModal(false);
-    setShowAddModal(false);
-    setEditingCategory(null);
-    setFormData({ name: '', icon: '📦', limit: '', color: '#E8E8E8' });
-    setSearchTerm('');
-  } catch (e) {
-    Alert.alert("Insert Error", e.message || "Failed to save category.");
-  }
-};
+    if (error || !user) {
+      Alert.alert("Error", "User session expired.");
+      return;
+    }
 
+    // ✅ Prevent duplicate category names
+    const nameExists = categories.some(c =>
+      c.name.toLowerCase() === formData.name.toLowerCase() &&
+      (!editingCategory || c.id !== editingCategory.id)
+    );
 
+    if (nameExists) {
+      Alert.alert("Error", "Category with this name already exists.");
+      return;
+    }
 
+    // ✅ Convert string limit to float (handle empty or invalid values)
+    const parsedLimit = parseFloat(formData.limit);
+    if (isNaN(parsedLimit) || parsedLimit < 0) {
+      Alert.alert("Error", "Please enter a valid positive number for limit.");
+      return;
+    }
 
+    const categoryData = {
+      name: formData.name.trim(),
+      icon: formData.icon,
+      limit_: parsedLimit,
+      color: formData.color,
+      user_id: user.id,
+    };
 
+    try {
+      if (editingCategory && editingCategory.id) {
+        const { error } = await supabase
+          .from('categories')
+          .update(categoryData)
+          .eq('id', editingCategory.id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('categories')
+          .insert([categoryData]);
+
+        if (error) throw error;
+      }
+
+      await fetchCategories(); // Refresh after save
+
+      // Reset form and modal
+      setShowEditModal(false);
+      setShowAddModal(false);
+      setEditingCategory(null);
+      setFormData({ name: '', icon: '📦', limit: '', color: '#E8E8E8' });
+      setSearchTerm('');
+    } catch (e) {
+      Alert.alert("Save Error", e.message || "Failed to save category.");
+    }
+  };
 
   const confirmDelete = async () => {
-  try {
-    const { error } = await supabase
-      .from('categories')
-      .delete()
-      .eq('id', deletingCategory.id);
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', deletingCategory.id);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    await fetchCategories();
-    setShowDeleteModal(false);
-    setDeletingCategory(null);
-  } catch (e) {
-    Alert.alert("Delete Error", e.message || "Failed to delete category.");
-  }
-};
-
-
-
+      await fetchCategories();
+      setShowDeleteModal(false);
+      setDeletingCategory(null);
+    } catch (e) {
+      Alert.alert("Delete Error", e.message || "Failed to delete category.");
+    }
+  };
 
   const filteredCategories = categories.filter(category =>
     category.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -466,12 +460,12 @@ const toggleMoreMenu = () => {
           <View style={styles.categoryStats}>
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Limit</Text>
-              <Text style={styles.statValue}>${category.limit.toFixed(2)}</Text>
+              <Text style={styles.statValue}>Rs.{category.limit.toFixed(2)}</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Remaining</Text>
               <Text style={[styles.statValue, isOverBudget && styles.overBudget]}>
-                ${remaining.toFixed(2)}
+                Rs{remaining.toFixed(2)}
               </Text>
             </View>
           </View>
@@ -486,6 +480,8 @@ const toggleMoreMenu = () => {
       transparent={true}
       animationType="fade"
       onRequestClose={onClose}
+      statusBarTranslucent={true}
+      supportedOrientations={['portrait']}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
@@ -511,22 +507,30 @@ const toggleMoreMenu = () => {
           onChangeText={(text) => setFormData({...formData, name: text})}
           placeholder="Enter category name"
           placeholderTextColor="#9CA3AF"
+          autoCapitalize="words"
+          autoCorrect={false}
         />
       </View>
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Budget Limit</Text>
         <TextInput
-        style={styles.textInput}
-        value={formData.limit.toString()} // force string input
-        onChangeText={(text) =>
-          setFormData({ ...formData, limit: text.replace(/[^0-9.]/g, '') }) // allow only numbers and dot
-        }
-        placeholder="0.00"
-        placeholderTextColor="#9CA3AF"
-        keyboardType="numeric"
-        returnKeyType="done"
-        inputMode="decimal"
+          style={styles.textInput}
+          value={formData.limit}
+          onChangeText={(text) => {
+            // Allow only numbers and one decimal point
+            const numericText = text.replace(/[^0-9.]/g, '');
+            // Prevent multiple decimal points
+            const parts = numericText.split('.');
+            const formattedText = parts.length > 2 
+              ? parts[0] + '.' + parts.slice(1).join('') 
+              : numericText;
+            setFormData({ ...formData, limit: formattedText });
+          }}
+          placeholder="0.00"
+          placeholderTextColor="#9CA3AF"
+          keyboardType="numeric"
+          returnKeyType="done"
         />
       </View>
 
@@ -625,7 +629,7 @@ const toggleMoreMenu = () => {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.summaryContainer}>
           <Text style={styles.summaryLabel}>Remaining (Monthly)</Text>
-          <Text style={styles.summaryAmount}>${totalRemaining.toFixed(2)}</Text>
+          <Text style={styles.summaryAmount}>Rs.{totalRemaining.toFixed(2)}</Text>
         </View>
 
         <View style={styles.categoriesContainer}>
@@ -647,7 +651,7 @@ const toggleMoreMenu = () => {
 
        <View style={styles.bottomNav}>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive
-          
+
         ]}
         onPress={onBack} >
           <Home size={24} color="white" />
@@ -789,15 +793,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   categoryCard: {
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    marginBottom: 12,
-  },
+  borderRadius: 12,
+  padding: 16,
+  marginBottom: 12,
+  backgroundColor: '#fff',
+  borderWidth: 0.7,
+  borderColor: 'rgba(0,0,0,0.05)',
+},
   categoryContent: {
     flexDirection: 'row',
     alignItems: 'center',
