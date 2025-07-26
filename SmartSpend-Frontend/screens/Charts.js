@@ -260,7 +260,7 @@ export default function ChartsScreen({ onBack, onTransactions, onLogout }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <StatusBar barStyle="dark-content" backgroundColor="#008080" />
 
       {/* Header */}
       <View style={styles.header}>
@@ -369,19 +369,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#008080',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB',
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#1F2937',
+    color: '#FFFFFF',
     marginBottom: 4,
   },
   totalText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#F3F4F6',
   },
 
   chartWrapper: {

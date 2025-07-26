@@ -2,9 +2,14 @@
   "expo": {
     "name": "SmartSpendApp",
     "slug": "SmartSpendApp",
+    "icon": "./screens/images/App_Logo.png",
     "version": "1.0.0",
     "sdkVersion": "51.0.0",
     "orientation": "portrait",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
       "**/*"
@@ -20,19 +25,27 @@
           "android": {
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0"
+            "buildToolsVersion": "34.0.0",
+            "package": "com.amarbazlin.smartspend"
           },
           "ios": {
-            "deploymentTarget": "13.4"
+            "deploymentTarget": "13.4",
+            "package": "com.amarbazlin.smartspend"
           }
         }
       ]
     ],
     "extra": {
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "b8768969-09cf-4501-91c9-572682b186bd"
+      }
+    },
+    "owner": "amarbazlin",
+    "ios": {
+      "bundleIdentifier": "y",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
       }
     }
   }
 }
-

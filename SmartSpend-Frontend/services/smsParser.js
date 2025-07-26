@@ -1,15 +1,32 @@
-export const parseBankSMS = (body) => {
-  const match = body.match(/(?:Rs\.?|LKR)\s?([\d,]+\.\d{2})/);
-  const amount = match ? parseFloat(match[1].replace(',', '')) : null;
+const parseBankSMS = (sms) => {
+  if (!sms || typeof sms !== 'string') return null;
+  const body = sms.replace(/\s+/g, ' ').trim();
 
-  let category = 'Other';
-  if (/food|restaurant|eat|dine/i.test(body)) category = 'Food';
-  else if (/uber|bus|train|taxi/i.test(body)) category = 'Transport';
-  else if (/movie|netflix|tv|cinema/i.test(body)) category = 'Entertainment';
-  else if (/shop|store|mall|purchase/i.test(body)) category = 'Shopping';
-  else if (/hospital|medical|health|clinic/i.test(body)) category = 'Health & Fitness';
-  else if (/electric|water|bill|utility/i.test(body)) category = 'Utilities';
-  else if (/school|tuition|education/i.test(body)) category = 'Education';
+  const amountMatch =
+    body.match(/Amount\(Approx\.?\):\s*([\d,]+(?:\.\d+)?)/i) ||
+    body.match(/Amount:\s*([\d,]+(?:\.\d+)?)\s*LKR/i) ||
+    body.match(/Rs\.?\s*([\d,]+(?:\.\d+)?)/i);
 
-  return amount ? { amount, category } : null;
+  if (!amountMatch) return null;
+
+  const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+  const dateMatch = body.match(/Date:([0-9]{2}\.[0-9]{2}\.[0-9]{2})/i);
+  const timeMatch = body.match(/Time:([0-9]{2}:[0-9]{2})/i);
+  const locationMatch = body.match(/Location:([^,]+)/i);
+  
+  // ✅ Extract location and format category
+  const location = locationMatch?.[1]?.trim() || 'Unknown Location';
+  const category = `Other - ${location}`;  // Format: "Other - ARPICO-HYDE PARK"
+
+  const type = /credit|income/i.test(body) ? 'income' : 'expense';
+
+  return {
+    type,
+    category,
+    amount,
+    description: sms,
+    account: 'Bank',  // ✅ Set account as Bank
+    smsDate: dateMatch ? dateMatch[1] : null,
+    smsTime: timeMatch ? timeMatch[1] : null,
+  };
 };

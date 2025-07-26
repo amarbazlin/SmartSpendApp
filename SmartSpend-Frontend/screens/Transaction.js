@@ -27,7 +27,10 @@ const TransactionForm = ({
   onClose = () => {}, 
   transactionType = 'expense', 
   onBack, 
-  onTransactionComplete 
+  onTransactionComplete,
+  mode = 'add',        // ✅ Add this
+  editTransaction,     // ✅ Add this
+  onUpdate             // ✅ Add this
 }) => {
   const [selectedTab, setSelectedTab] = useState(transactionType);
   const [date, setDate] = useState(new Date().toLocaleDateString('en-US', { 
@@ -73,6 +76,23 @@ const [user, setUser] = useState(null);
     await loadAccountsFromSupabase(user);
   })();
 }, []);
+useEffect(() => {
+  if (mode === 'edit' && editTransaction) {
+    setSelectedTab(editTransaction.type || 'expense');
+    setAmount(String(editTransaction.amount || ''));
+    setCategory(editTransaction.category || '');
+    setAccount(editTransaction.payment_method || editTransaction.account || 'Cash');
+    setNote(editTransaction.note || '');
+    setDescription(editTransaction.description || '');
+    
+    // Find category ID if it exists
+    const allCategories = [...categories.income, ...categories.expense];
+    const foundCategory = allCategories.find(cat => cat.name === editTransaction.category);
+    if (foundCategory) {
+      setSelectedCategoryId(foundCategory.id);
+    }
+  }
+}, [mode, editTransaction, categories]);
 
   const loadCategoriesFromSupabase = async () => {
   try {
@@ -298,19 +318,32 @@ const [user, setUser] = useState(null);
 const handleSave = async () => {
   if (!validateForm()) return;
   try {
-    await persistTransaction();
-    Alert.alert('Success', 'Transaction saved');
-    onTransactionComplete?.({
-      type: selectedTab,
-      date: new Date().toISOString().split('T')[0],
-      amount: parseFloat(amount),
-      category: category,               // Add the category name
-      category_id: selectedCategoryId,  // Keep the category ID
-      account,
-      note,
-      description,
-    });
+    if (mode === 'edit') {
+      // ✅ Handle edit mode
+      onUpdate?.({
+        amount: parseFloat(amount),
+        category: category,
+        category_id: selectedCategoryId,
+        account,
+        note,
+        description,
+      });
+    } else {
+      // ✅ Handle add mode
+      onTransactionComplete?.({
+        type: selectedTab,
+        date: new Date().toISOString().split('T')[0],
+        amount: parseFloat(amount),
+        category: category,
+        category_id: selectedCategoryId,
+        account,
+        note,
+        description,
+      });
+    }
+    
     resetForm();
+    onClose();
   } catch (e) {
     console.error(e);
     Alert.alert('Error', e.message || 'Failed to save transaction');

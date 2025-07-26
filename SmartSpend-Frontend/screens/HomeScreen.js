@@ -8,6 +8,7 @@ import {
   ScrollView,
   SafeAreaView,
   Image,
+  StatusBar,
   Modal,
   Dimensions,
 } from 'react-native';
@@ -307,6 +308,7 @@ if (currentScreen === 'charts') {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
+         <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
         {/* Header - Removed menu and search */}
         <View style={styles.header}>
           <View style={styles.headerCenter}>
@@ -410,39 +412,10 @@ if (currentScreen === 'charts') {
 
           {/* Recent Transactions */}
           <View style={styles.transactionsSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Transaction</Text>
-              <TouchableOpacity onPress={navigateToTransactionsScreen}>
-                <Text style={styles.viewAllText}>View All</Text>
-              </TouchableOpacity>
-            </View>
+            
             
             <View style={styles.transactionsList}>
-              <TouchableOpacity style={styles.transactionItem}>
-                <View style={styles.transactionLeft}>
-                  <View style={styles.transactionIcon}>
-                    <DollarSign size={20} color="#D97706" />
-                  </View>
-                  <View>
-                    <Text style={styles.transactionTitle}>Deposit from account</Text>
-                    <Text style={styles.transactionDate}>28 January 2021</Text>
-                  </View>
-                </View>
-                <Text style={styles.transactionAmountRed}>-Rs.850</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.transactionItem}>
-                <View style={styles.transactionLeft}>
-                  <View style={[styles.transactionIcon, styles.blueTransactionIcon]}>
-                    <Text style={styles.transactionIconText}>P</Text>
-                  </View>
-                  <View>
-                    <Text style={styles.transactionTitle}>Deposit Paypal</Text>
-                    <Text style={styles.transactionDate}>25 January 2021</Text>
-                  </View>
-                </View>
-                <Text style={styles.transactionAmountGreen}>+Rs.2,500</Text>
-              </TouchableOpacity>
+              
             </View>
           </View>
         </View>
@@ -506,6 +479,7 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     justifyContent: 'center',
+    marginTop: -7,
     alignItems: 'center',
     marginBottom: 4,
     overflow: 'hidden',
@@ -582,12 +556,14 @@ const styles = StyleSheet.create({
   },
   balanceAmount: {
     color: 'white',
-    fontSize: 28,
+    fontSize: 22,
+    marginLeft: -8,
     fontWeight: 'bold',
   },
   expenseAmount: {
     color: '#FCA5A5',
     fontSize: 22,
+    marginRight:-6 ,
     fontWeight: 'bold',
   },
   progressContainer: {

@@ -1,6 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  memo,
+} from 'react';
 import { supabase } from '../services/supabase';
-
 import {
   View,
   Text,
@@ -15,48 +20,71 @@ import {
   StatusBar,
   Alert,
   Dimensions,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
-import { 
-  Home, 
-  Wallet, 
-  Target, 
-  BarChart3, 
-  DollarSign, 
-  Eye, 
-  CheckCircle,
+import {
+  Home,
+  Wallet,
+  DollarSign,
   Lock,
-  Mail,
   X,
-  Bell, 
+  Bell,
   Palette,
   Globe,
   LogOut,
-  MessageCircle,
-  PieChart,
-  Calculator,
-  MoreHorizontal
+  MoreHorizontal,
 } from 'lucide-react-native';
 
+const { width: screenWidth } = Dimensions.get('window');
 
+/* ------------------------------------------------------------------ */
+/* --------------------------- UTIL ICON ---------------------------- */
+/* ------------------------------------------------------------------ */
+const Icon = ({ name, size = 24, color = '#000' }) => {
+  const iconMap = {
+    menu: '☰',
+    search: '🔍',
+    plus: '+',
+    close: '✕',
+    home: '🏠',
+    dollar: '$',
+    target: '🎯',
+    chart: '📊',
+  };
+  return (
+    <Text style={[{ fontSize: size, color }, styles.iconText]}>
+      {iconMap[name] || name}
+    </Text>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* --------------------------- MORE MENU ---------------------------- */
+/* ------------------------------------------------------------------ */
 const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   return (
     <Modal
       visible={isOpen}
-      transparent={true}
+      transparent
       animationType="fade"
       onRequestClose={onClose}
+      presentationStyle="overFullScreen"
     >
       <View style={styles.moreModalOverlay}>
-        <TouchableOpacity 
-          style={styles.moreBackdrop} 
+        <TouchableOpacity
+          style={styles.moreBackdrop}
           onPress={onClose}
           activeOpacity={1}
         />
-        
-        {/* More Menu */}
         <View style={styles.moreMenu}>
-          <ScrollView style={styles.moreMenuContent}>
-            {/* Header */}
+          <ScrollView
+          style={styles.moreMenuContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
+          >
             <View style={styles.moreMenuHeader}>
               <View style={styles.profileSection}>
                 <View style={styles.profileImage}>
@@ -76,9 +104,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Menu Items */}
             <View style={styles.menuItems}>
-              {/* Passcode Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Lock size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -87,7 +113,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Main Currency Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -96,7 +121,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Sub Currency Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -104,7 +128,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Alarm Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Bell size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -112,7 +135,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Style */}
               <TouchableOpacity style={styles.menuItem}>
                 <Palette size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -120,7 +142,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Language Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Globe size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -128,8 +149,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Logout */}
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.menuItem, styles.logoutItem]}
                 onPress={onLogout}
               >
@@ -146,104 +166,309 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   );
 };
 
-// Mock icon components (replace with react-native-vector-icons or similar)
-const Icon = ({ name, size = 24, color = '#000' }) => {
-  const iconMap = {
-    menu: '☰',
-    search: '🔍',
-    plus: '+',
-    edit: '✏️',
-    trash: '🗑️',
-    close: '✕',
-    home: '🏠',
-    dollar: '$',
-    target: '🎯',
-    chart: '📊'
-  };
-  
-  return (
-    <Text style={[{ fontSize: size, color }, styles.iconText]}>
-      {iconMap[name] || name}
-    </Text>
-  );
-};
+/* ------------------------------------------------------------------ */
+/* ---------------------- CATEGORY FORM MODAL ----------------------- */
+/* ------------------------------------------------------------------ */
 
-const { width: screenWidth } = Dimensions.get('window');
-
-const CategoryManager = ({onBack, onLogout, onTransactions}) => {
-  const [userId, setUserId] = useState(null);
-  const [categories, setCategories] = useState([]);
-  const [currentScreen, setCurrentScreen] = useState('categories');
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [editingCategory, setEditingCategory] = useState(null);
-  const [deletingCategory, setDeletingCategory] = useState(null);
-
-  // Form states
-  const [formData, setFormData] = useState({
+const CategoryFormModal = memo(function CategoryFormModal({
+  visible,
+  onClose,
+  onSave,
+  initialData,
+  availableIcons,
+  availableColors,
+}) {
+  const [localForm, setLocalForm] = useState({
     name: '',
-    icon: '📦',
     limit: '',
-    color: '#E8E8E8'
+    icon: '📦',
+    color: '#E8E8E8',
   });
 
-  // Available icons and colors
-  const availableIcons = ['🍜', '🚌', '📚', '🎬', '🛍️', '💪', '⚡', '💄', '🏠', '🎮', '☕', '🎵'];
-  const availableColors = [
-    '#E8E8E8', '#A8C8EC', '#F4E4A6', '#F8BBD9', 
-    '#C7D2FE', '#A7F3D0', '#FEF3C7', '#FECACA',
-    '#D1FAE5', '#DBEAFE', '#E0E7FF', '#FCE7F3'
-  ];
-
-  // Simulate API call to fetch categories
   useEffect(() => {
-  (async () => {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) {
-      Alert.alert("Error", "Unable to fetch user session");
-      return;
+    if (visible) {
+      const { name = '', limit = '', icon = '📦', color = '#E8E8E8' } =
+        initialData || {};
+      setLocalForm({
+        name: name ?? '',
+        limit: limit !== undefined && limit !== null ? String(limit) : '',
+        icon,
+        color,
+      });
     }
-    setUserId(user.id);
-    await fetchCategories();
-  })();
-}, []);
-useEffect(() => {
-  if (!userId) return;
+  }, [visible, initialData]);
 
-  const channel = supabase
-    .channel('expenses-realtime')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'expenses',
-        filter: `user_id=eq.${userId}`,
-      },
-      (payload) => {
-        const { category, amount } = payload.new;
+  const updateFormName = useCallback((text) => {
+    setLocalForm((p) => ({ ...p, name: text }));
+  }, []);
 
-        setCategories(prev =>
-          prev.map(c =>
-            c.name === category
-              ? { ...c, spent: (c.spent || 0) + Number(amount) }
-              : c
-          )
-        );
+  const updateFormLimit = useCallback((text) => {
+    const numericText = text.replace(/[^0-9.]/g, '');
+    const parts = numericText.split('.');
+    const formattedText =
+      parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : numericText;
+    setLocalForm((p) => ({ ...p, limit: formattedText }));
+  }, []);
+
+  const updateFormIcon = useCallback((icon) => {
+    setLocalForm((p) => ({ ...p, icon }));
+  }, []);
+
+  const updateFormColor = useCallback((color) => {
+    setLocalForm((p) => ({ ...p, color }));
+  }, []);
+
+  const handleSave = useCallback(() => {
+    onSave(localForm);
+  }, [localForm, onSave]);
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      presentationStyle="overFullScreen"
+      onRequestClose={onClose}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalContent}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 32 : 0}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {initialData?.id ? 'Edit Category' : 'Add New Category'}
+              </Text>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <Icon name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="none"
+              contentContainerStyle={{ paddingBottom: 16 }}
+            >
+              <View style={styles.form}>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Category Name</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={localForm.name}
+                    onChangeText={updateFormName}
+                    placeholder="Enter category name"
+                    placeholderTextColor="#9CA3AF"
+                    blurOnSubmit={false}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    returnKeyType="done"
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Budget Limit</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={localForm.limit}
+                    onChangeText={updateFormLimit}
+                    placeholder="0.00"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="decimal-pad"
+                    returnKeyType="done"
+                    blurOnSubmit={false}
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Icon</Text>
+                  <View style={styles.iconGrid}>
+                    {availableIcons.map((icon) => (
+                      <TouchableOpacity
+                        key={icon}
+                        onPress={() => updateFormIcon(icon)}
+                        style={[
+                          styles.iconOption,
+                          localForm.icon === icon && styles.selectedIcon,
+                        ]}
+                      >
+                        <Text style={styles.iconOptionText}>{icon}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Color</Text>
+                  <View style={styles.colorGrid}>
+                    {availableColors.map((color) => (
+                      <TouchableOpacity
+                        key={color}
+                        onPress={() => updateFormColor(color)}
+                        style={[
+                          styles.colorOption,
+                          { backgroundColor: color },
+                          localForm.color === color && styles.selectedColor,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.formButtons}>
+                  <TouchableOpacity
+                    onPress={onClose}
+                    style={styles.cancelButton}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleSave} style={styles.saveButton}>
+                    <Text style={styles.saveButtonText}>
+                      {initialData?.id ? 'Save Changes' : 'Add Category'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* ------------------------ DELETE MODAL ---------------------------- */
+/* ------------------------------------------------------------------ */
+const DeleteModal = memo(function DeleteModal({ visible, onClose, onConfirm, categoryName }) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      presentationStyle="overFullScreen"
+    >
+      <View style={styles.modalOverlay}>
+        <View style={[styles.modalContent, { maxHeight: undefined }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Delete Category</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Icon name="close" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.deleteConfirmation}>
+            <View style={styles.deleteIcon}>
+              <Icon name="trash" size={24} color="#DC2626" />
+            </View>
+            <Text style={styles.deleteTitle}>Delete Category</Text>
+            <Text style={styles.deleteMessage}>
+              Are you sure you want to delete "{categoryName}"? This action cannot
+              be undone.
+            </Text>
+            <View style={styles.deleteButtons}>
+              <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onConfirm} style={styles.deleteButton}>
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* ----------------------- CATEGORY MANAGER ------------------------- */
+/* ------------------------------------------------------------------ */
+const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
+  const [userId, setUserId] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+
+  const [showFormModal, setShowFormModal] = useState(false);
+  const [formInitialData, setFormInitialData] = useState(null); // null = add, object = edit
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingCategory, setDeletingCategory] = useState(null);
+
+  const availableIcons = useMemo(
+    () => ['🍜', '🚌', '📚', '🎬', '🛍️', '💪', '⚡', '💄', '🏠', '🎮', '☕', '🎵'],
+    []
+  );
+  const availableColors = useMemo(
+    () => [
+      '#E8E8E8',
+      '#A8C8EC',
+      '#F4E4A6',
+      '#F8BBD9',
+      '#C7D2FE',
+      '#A7F3D0',
+      '#FEF3C7',
+      '#FECACA',
+      '#D1FAE5',
+      '#DBEAFE',
+      '#E0E7FF',
+      '#FCE7F3',
+    ],
+    []
+  );
+
+  useEffect(() => {
+    (async () => {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+      if (error || !user) {
+        Alert.alert('Error', 'Unable to fetch user session');
+        return;
       }
-    )
-    .subscribe();
+      setUserId(user.id);
+      await fetchCategories(user.id);
+    })();
+  }, []);
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [userId]);
+  useEffect(() => {
+    if (!userId) return;
 
-  const fetchCategories = async () => {
+    const channel = supabase
+      .channel('expenses-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+        table: 'expenses',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const { category, amount } = payload.new;
+          setCategories((prev) =>
+            prev.map((c) =>
+              c.name === category
+                ? { ...c, spent: (c.spent || 0) + Number(amount) }
+                : c
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  const fetchCategories = useCallback(async (uidParam = null) => {
     setLoading(true);
 
     const {
@@ -251,8 +476,9 @@ useEffect(() => {
       error: userError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      Alert.alert("Error", "Unable to fetch user session");
+    const uid = uidParam || user?.id;
+    if (userError || !uid) {
+      Alert.alert('Error', 'Unable to fetch user session');
       setLoading(false);
       return;
     }
@@ -260,136 +486,123 @@ useEffect(() => {
     const { data: allCategories, error: catError } = await supabase
       .from('categories')
       .select('*')
-      .or(`user_id.is.null,user_id.eq.${user.id}`)
-      .order('id', { ascending: false }); // ✅ Order by ID descending (newest first)
+      .or(`user_id.is.null,user_id.eq.${uid}`)
+      .order('id', { ascending: false });
 
     if (catError) {
-      Alert.alert("Error fetching categories", catError.message);
+      Alert.alert('Error fetching categories', catError.message);
       setLoading(false);
       return;
     }
 
-    const { data: expenses, error: expenseErr } = await supabase
+    const { data: expenses } = await supabase
       .from('expenses')
       .select('category, amount')
-      .eq('user_id', user.id);
+      .eq('user_id', uid);
 
     const spentMap = {};
     if (expenses) {
-      expenses.forEach(exp => {
+      expenses.forEach((exp) => {
         spentMap[exp.category] = (spentMap[exp.category] || 0) + exp.amount;
       });
     }
 
-    const enriched = allCategories.map(cat => ({
+    const enriched = allCategories.map((cat) => ({
       ...cat,
       spent: spentMap[cat.name] || 0,
-      limit: cat.limit_ || 0 // ✅ Map from correct column
+      limit: cat.limit_ || 0,
     }));
 
     setCategories(enriched);
     setLoading(false);
-  };
+  }, []);
 
-  const handleEdit = (category) => {
-    setEditingCategory(category); // ✅ sets the exact item to be updated
-    setFormData({
-      name: category.name,
-      icon: category.icon,
-      limit: category.limit.toString(), // from derived limit
-      color: category.color,
+  const filteredCategories = useMemo(
+    () =>
+      categories.filter((category) =>
+        category.name.toLowerCase().includes(searchTerm.toLowerCase())
+      ),
+    [categories, searchTerm]
+  );
+
+  const totalRemaining = useMemo(
+    () =>
+      categories.reduce((sum, category) => {
+        const remaining = category.limit - category.spent;
+        return sum + Math.max(remaining, 0);
+      }, 0),
+    [categories]
+  );
+
+  const handleAdd = useCallback(() => {
+    setFormInitialData(null);
+    setShowFormModal(true);
+  }, []);
+
+  const handleEdit = useCallback((category) => {
+    setFormInitialData({
+      ...category,
+      limit: category.limit,
     });
-    setShowEditModal(true);
-  };
+    setShowFormModal(true);
+  }, []);
 
-  const toggleMoreMenu = () => {
-    setIsMoreMenuOpen(!isMoreMenuOpen);
-  };
-
-  const closeMoreMenu = () => {
-    setIsMoreMenuOpen(false);
-  };
-
-  const handleLogout = () => {
-    closeMoreMenu();
-    if (onLogout) {
-      onLogout();
-    }
-  };
-
-  const navigateToTransactionsScreen = () => {
-    setCurrentScreen('transactionsScreen');
-  };
-
-  const handleDelete = (category) => {
+  const handleDelete = useCallback((category) => {
     setDeletingCategory(category);
     setShowDeleteModal(true);
-  };
+  }, []);
 
-  const handleAdd = () => {
-    setFormData({
-      name: '',
-      icon: '📦',
-      limit: '',
-      color: '#E8E8E8'
-    });
-    setShowAddModal(true);
-  };
+  const handleSaveForm = useCallback(
+    async (form) => {
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+        if (error || !user) {
+          Alert.alert('Error', 'User session expired.');
+          return;
+        }
 
-  const saveCategory = async () => {
-  if (!formData.name || !formData.limit) {
-    Alert.alert('Error', 'Please fill in all required fields');
-    return;
-  }
+        const parsedLimit = parseFloat(form.limit);
+        if (isNaN(parsedLimit) || parsedLimit < 0) {
+          Alert.alert('Error', 'Please enter a valid positive number for limit.');
+          return;
+        }
 
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    Alert.alert("Error", "User session expired.");
-    return;
-  }
+        const categoryData = {
+          name: form.name.trim(),
+          icon: form.icon,
+          limit_: parsedLimit,
+          color: form.color,
+          user_id: user.id,
+          type: 'expense',
+        };
 
-  const parsedLimit = parseFloat(formData.limit);
-  if (isNaN(parsedLimit) || parsedLimit < 0) {
-    Alert.alert("Error", "Please enter a valid positive number for limit.");
-    return;
-  }
+        if (formInitialData?.id) {
+          const { error: upErr } = await supabase
+            .from('categories')
+            .update(categoryData)
+            .eq('id', formInitialData.id);
+          if (upErr) throw upErr;
+        } else {
+          const { error: insErr } = await supabase
+            .from('categories')
+            .insert([categoryData]);
+          if (insErr) throw insErr;
+        }
 
-  const categoryData = {
-    name: formData.name.trim(),
-    icon: formData.icon,
-    limit_: parsedLimit,
-    color: formData.color,
-    user_id: user.id,
-    type: 'expense', // default new categories to expense
-  };
+        await fetchCategories();
+        setShowFormModal(false);
+        setFormInitialData(null);
+      } catch (e) {
+        Alert.alert('Save Error', e.message || 'Failed to save category.');
+      }
+    },
+    [fetchCategories, formInitialData]
+  );
 
-  try {
-    if (editingCategory && editingCategory.id) {
-      const { error } = await supabase
-        .from('categories')
-        .update(categoryData)
-        .eq('id', editingCategory.id);
-
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from('categories')
-        .insert([categoryData]);
-
-      if (error) throw error;
-    }
-
-    await fetchCategories();
-    setShowEditModal(false);
-    setShowAddModal(false);
-    setEditingCategory(null);
-    setFormData({ name: '', icon: '📦', limit: '', color: '#E8E8E8' });
-  } catch (e) {
-    Alert.alert("Save Error", e.message || "Failed to save category.");
-  }
-};
-
-  const confirmDelete = async () => {
+  const confirmDelete = useCallback(async () => {
     try {
       const { error } = await supabase
         .from('categories')
@@ -402,18 +615,19 @@ useEffect(() => {
       setShowDeleteModal(false);
       setDeletingCategory(null);
     } catch (e) {
-      Alert.alert("Delete Error", e.message || "Failed to delete category.");
+      Alert.alert('Delete Error', e.message || 'Failed to delete category.');
     }
-  };
+  }, [deletingCategory, fetchCategories]);
 
-  const filteredCategories = categories.filter(category =>
-    category.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const toggleMoreMenu = () => setIsMoreMenuOpen((p) => !p);
+  const closeMoreMenu = () => setIsMoreMenuOpen(false);
 
-  const totalRemaining = categories.reduce((sum, category) => {
-    const remaining = category.limit - category.spent;
-    return sum + Math.max(remaining, 0);
-  }, 0);
+  const handleLogoutClick = useCallback(() => {
+    closeMoreMenu();
+    onLogout?.();
+  }, [onLogout]);
+
+  /* ---------------- UI small components ---------------- */
 
   const LoadingSpinner = () => (
     <View style={styles.loadingContainer}>
@@ -441,6 +655,7 @@ useEffect(() => {
             value={searchTerm}
             onChangeText={setSearchTerm}
             placeholderTextColor="#6B7280"
+            blurOnSubmit={false}
           />
         </View>
       </View>
@@ -450,14 +665,13 @@ useEffect(() => {
   const CategoryCard = ({ category }) => {
     const remaining = category.limit - category.spent;
     const isOverBudget = remaining < 0;
-    
     return (
       <View style={[styles.categoryCard, { backgroundColor: category.color }]}>
         <View style={styles.categoryContent}>
           <View style={styles.categoryIconContainer}>
             <Text style={styles.categoryIcon}>{category.icon}</Text>
           </View>
-          
+
           <View style={styles.categoryInfo}>
             <Text style={styles.categoryName}>{category.name}</Text>
             <View style={styles.categoryActions}>
@@ -465,7 +679,7 @@ useEffect(() => {
                 onPress={() => handleEdit(category)}
                 style={styles.actionButton}
               >
-                <Icon name="edit" size={14} color="#6B7280" />
+               
                 <Text style={styles.actionText}>Edit</Text>
               </TouchableOpacity>
               <Text style={styles.separator}>|</Text>
@@ -473,14 +687,14 @@ useEffect(() => {
                 onPress={() => handleDelete(category)}
                 style={styles.actionButton}
               >
-                <Icon name="trash" size={14} color="#6B7280" />
+              
                 <Text style={styles.actionText}>Remove</Text>
               </TouchableOpacity>
             </View>
           </View>
 
           <View style={styles.categoryStats}>
-            <View style={styles.statItem}>
+          <View style={styles.statItem}>
               <Text style={styles.statLabel}>Limit</Text>
               <Text style={styles.statValue}>Rs.{category.limit.toFixed(2)}</Text>
             </View>
@@ -496,159 +710,19 @@ useEffect(() => {
     );
   };
 
-  const CustomModal = ({ visible, onClose, title, children }) => (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent={true}
-      supportedOrientations={['portrait']}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{title}</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Icon name="close" size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          {children}
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const CategoryForm = () => (
-    <View style={styles.form}>
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Category Name</Text>
-        <TextInput
-          style={styles.textInput}
-          value={formData.name}
-          onChangeText={(text) => setFormData({...formData, name: text})}
-          placeholder="Enter category name"
-          placeholderTextColor="#9CA3AF"
-          autoCapitalize="words"
-          autoCorrect={false}
-        />
-      </View>
-
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Budget Limit</Text>
-        <TextInput
-          style={styles.textInput}
-          value={formData.limit}
-          onChangeText={(text) => {
-            // Allow only numbers and one decimal point
-            const numericText = text.replace(/[^0-9.]/g, '');
-            // Prevent multiple decimal points
-            const parts = numericText.split('.');
-            const formattedText = parts.length > 2 
-              ? parts[0] + '.' + parts.slice(1).join('') 
-              : numericText;
-            setFormData({ ...formData, limit: formattedText });
-          }}
-          placeholder="0.00"
-          placeholderTextColor="#9CA3AF"
-          keyboardType="numeric"
-          returnKeyType="done"
-        />
-      </View>
-
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Icon</Text>
-        <View style={styles.iconGrid}>
-          {availableIcons.map((icon) => (
-            <TouchableOpacity
-              key={icon}
-              onPress={() => setFormData({...formData, icon})}
-              style={[
-                styles.iconOption,
-                formData.icon === icon && styles.selectedIcon
-              ]}
-            >
-              <Text style={styles.iconOptionText}>{icon}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Color</Text>
-        <View style={styles.colorGrid}>
-          {availableColors.map((color) => (
-            <TouchableOpacity
-              key={color}
-              onPress={() => setFormData({...formData, color})}
-              style={[
-                styles.colorOption,
-                { backgroundColor: color },
-                formData.color === color && styles.selectedColor
-              ]}
-            />
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.formButtons}>
-        <TouchableOpacity
-          onPress={() => {
-            setShowEditModal(false);
-            setShowAddModal(false);
-          }}
-          style={styles.cancelButton}
-        >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={saveCategory}
-          style={styles.saveButton}
-        >
-          <Text style={styles.saveButtonText}>
-            {editingCategory ? 'Save Changes' : 'Add Category'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const DeleteConfirmation = () => (
-    <View style={styles.deleteConfirmation}>
-      <View style={styles.deleteIcon}>
-        <Icon name="trash" size={24} color="#DC2626" />
-      </View>
-      <Text style={styles.deleteTitle}>Delete Category</Text>
-      <Text style={styles.deleteMessage}>
-        Are you sure you want to delete "{deletingCategory?.name}"? This action cannot be undone.
-      </Text>
-      <View style={styles.deleteButtons}>
-        <TouchableOpacity
-          onPress={() => setShowDeleteModal(false)}
-          style={styles.cancelButton}
-        >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={confirmDelete}
-          style={styles.deleteButton}
-        >
-          <Text style={styles.deleteButtonText}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  if (loading) {
-    return <LoadingSpinner />;
-  }
+  if (loading) return <LoadingSpinner />;
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <Header />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="none"
+      >
         <View style={styles.summaryContainer}>
           <Text style={styles.summaryLabel}>Remaining (Monthly)</Text>
           <Text style={styles.summaryAmount}>Rs.{totalRemaining.toFixed(2)}</Text>
@@ -659,27 +733,24 @@ useEffect(() => {
             <CategoryCard key={category.id} category={category} />
           ))}
         </View>
-        
-        {/* Bottom padding for FAB */}
+
         <View style={styles.bottomPadding} />
       </ScrollView>
 
-      <TouchableOpacity
-        onPress={handleAdd}
-        style={styles.fab}
-      >
+      <TouchableOpacity onPress={handleAdd} style={styles.fab}>
         <Icon name="plus" size={24} color="#FFFFFF" />
       </TouchableOpacity>
 
-       <View style={styles.bottomNav}>
-        <TouchableOpacity style={[styles.navItem, styles.navItemInactive
+      <View style={styles.bottomNav}>
+        <TouchableOpacity
 
-        ]}
-        onPress={onBack} >
+          style={[styles.navItem, styles.navItemInactive]}
+          onPress={onBack}
+        >
           <Home size={24} color="white" />
           <Text style={styles.navText}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.navItem, styles.navItemInactive]}
           onPress={onTransactions}
         >
@@ -690,7 +761,7 @@ useEffect(() => {
           <Wallet size={24} color="white" />
           <Text style={styles.navText}>Accounts</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.navItem, styles.navItemInactive]}
           onPress={toggleMoreMenu}
         >
@@ -700,39 +771,36 @@ useEffect(() => {
       </View>
 
       {/* More Menu */}
-      <MoreMenu 
-        isOpen={isMoreMenuOpen} 
-        onClose={closeMoreMenu} 
-        onLogout={handleLogout} 
+      <MoreMenu
+        isOpen={isMoreMenuOpen}
+        onClose={closeMoreMenu}
+        onLogout={handleLogoutClick}
       />
 
-      <CustomModal 
-        visible={showEditModal} 
-        onClose={() => setShowEditModal(false)} 
-        title="Edit Category"
-      >
-        <CategoryForm />
-      </CustomModal>
+      {/* Form Modal */}
+      <CategoryFormModal
+        visible={showFormModal}
+        onClose={() => setShowFormModal(false)}
+        onSave={handleSaveForm}
+        initialData={formInitialData}
+        availableIcons={availableIcons}
+        availableColors={availableColors}
+      />
 
-      <CustomModal 
-        visible={showAddModal} 
-        onClose={() => setShowAddModal(false)} 
-        title="Add New Category"
-      >
-        <CategoryForm />
-      </CustomModal>
-
-      <CustomModal 
-        visible={showDeleteModal} 
-        onClose={() => setShowDeleteModal(false)} 
-        title=""
-      >
-        <DeleteConfirmation />
-      </CustomModal>
+      {/* Delete Modal */}
+      <DeleteModal
+        visible={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={confirmDelete}
+        categoryName={deletingCategory?.name}
+      />
     </SafeAreaView>
   );
 };
 
+/* ------------------------------------------------------------------ */
+/* ------------------------------- STYLES --------------------------- */
+/* ------------------------------------------------------------------ */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -815,13 +883,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   categoryCard: {
-  borderRadius: 12,
-  padding: 16,
-  marginBottom: 12,
-  backgroundColor: '#fff',
-  borderWidth: 0.7,
-  borderColor: 'rgba(0,0,0,0.05)',
-},
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    borderWidth: 0.7,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
   categoryContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -857,7 +925,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionText: {
-    color: '#6B7280',
+    color: '#CD5C5C',
     fontSize: 14,
     marginLeft: 4,
   },
@@ -917,7 +985,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  // More Menu Styles
+  // More Menu
   moreModalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -1016,6 +1084,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#EF4444',
   },
+  // Modals (shared)
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1029,6 +1098,7 @@ const styles = StyleSheet.create({
     padding: 24,
     width: '100%',
     maxWidth: 400,
+    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1040,10 +1110,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: '#1F2937',
-  },
-  closeButton: {
-    padding: 8,
-    borderRadius: 8,
   },
   form: {
     gap: 16,
