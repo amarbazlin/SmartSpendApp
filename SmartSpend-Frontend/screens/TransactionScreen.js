@@ -17,6 +17,7 @@ import {
   SectionList,
   PermissionsAndroid,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Home,
@@ -38,137 +39,322 @@ import TransactionForm from './Transaction';
 
 const SmsAndroid = Platform.OS === 'android' ? require('react-native-get-sms-android') : null;
 
+/** Helper: local yyyy-mm-dd */
+const ymdLocal = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 /* ------------------------------ Local Parser ------------------------------ */
+/**
+ * Robust Sri Lankan bank SMS parser
+ * Supports COMBANK, HNB, SAMPATH, BOC, PB, NDB, SEYLAN, DFCC, NTB, PABC, UBL (and similar formats)
+ */
 const parseBankSMS = (sms) => {
   if (!sms || typeof sms !== 'string') return null;
+
   const body = sms.replace(/\s+/g, ' ').trim();
 
-  const amountMatch =
-    body.match(/Amount\(Approx\.?\):\s*([\d,]+(?:\.\d+)?)/i) ||
-    body.match(/Amount:\s*([\d,]+(?:\.\d+)?)\s*LKR/i) ||
-    body.match(/Rs\.?\s*([\d,]+(?:\.\d+)?)/i);
+  // Ignore OTP / promo
+  if (/(OTP|One[-\s]?Time\s*Password|verification code|promo|offer|points|reward)/i.test(body)) {
+    return null;
+  }
 
-  if (!amountMatch) return null;
+  // -------- amount detection --------
+  const amountMatchers = [
+    // HNB style: Amount(Approx.):130.00 LKR
+    /Amount\(Approx\.?\)\s*:\s*([\d,]+(?:\.\d+)?)\s*(?:LKR|Rs\.?|රු\.?)?/i,
+    // Amount: 1,234.56 LKR
+    /Amount\s*:\s*([\d,]+(?:\.\d+)?)\s*(?:LKR|Rs\.?|රු\.?)?/i,
+    // Rs 1,234.56 / Rs. 1,234.56 / රු. 1,234.56
+    /(?:LKR|Rs\.?|රු\.?)\s*([\d,]+(?:\.\d+)?)/i,
+    // debited with 1,234.56
+    /(debited|credited)\s*(?:with)?\s*(?:LKR|Rs\.?|රු\.?)?\s*([\d,]+(?:\.\d+)?)/i,
+    // (approx LKR 3,200.00)
+    /\(approx(?:\.|imate)?\s*(?:LKR|Rs\.?)\s*([\d,]+(?:\.\d+)?)\)/i,
+  ];
 
-  const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-  const dateMatch = body.match(/Date:([0-9]{2}\.[0-9]{2}\.[0-9]{2})/i);
-  const timeMatch = body.match(/Time:([0-9]{2}:[0-9]{2})/i);
-  const locationMatch = body.match(/Location:([^,]+)/i);
-  
-  // ✅ Extract location and format category properly
-  const location = locationMatch?.[1]?.trim() || 'Unknown Location';
-  
-  const type = /credit|income/i.test(body) ? 'income' : 'expense';
+  let rawAmount = null;
+  for (const rx of amountMatchers) {
+    const m = body.match(rx);
+    if (m) {
+      rawAmount = m[2] || m[1]; // support regex with two groups
+      if (rawAmount) break;
+    }
+  }
+  if (!rawAmount) return null;
+
+  const amount = parseFloat(rawAmount.replace(/,/g, ''));
+  if (!isFinite(amount)) return null;
+
+  // -------- type detection --------
+  const expenseTriggers = [
+    'debited',
+    'spent',
+    'purchase',
+    'withdraw',
+    'cash wd',
+    'payment',
+    'bill',
+    'tap&go',
+    'tap & go',
+    'lankaqr',
+    'qr payment',
+    'transfer from',
+    'standing order',
+    'so executed',
+    'charge',
+    'fee',
+    'cash advance',
+    'pre-auth completion',
+  ];
+  const incomeTriggers = [
+    'credited',
+    'received',
+    'salary',
+    'deposit',
+    'loan disbursement',
+    'reversal',
+    'refund',
+    'interest',
+    'fd',
+  ];
+
+  const expenseRegex = new RegExp(expenseTriggers.join('|'), 'i');
+  const incomeRegex = new RegExp(incomeTriggers.join('|'), 'i');
+
+  let type = null;
+  if (incomeRegex.test(body) && !expenseRegex.test(body)) type = 'income';
+  else if (expenseRegex.test(body) && !incomeRegex.test(body)) type = 'expense';
+  else {
+    if (/debited/i.test(body)) type = 'expense';
+    else if (/credited/i.test(body)) type = 'income';
+  }
+  if (!type) return null;
+
+  // -------- category guess --------
+  let category = 'Other';
+  if (type === 'income') {
+    if (/salary/i.test(body)) category = 'Salary';
+    else if (/interest|fd/i.test(body)) category = 'Interest';
+    else if (/refund|reversal/i.test(body)) category = 'Refund';
+    else category = 'Income';
+  } else {
+    if (/lankaqr|qr/i.test(body)) category = 'QR Payment';
+    else if (/atm|cash wd|withdraw/i.test(body)) category = 'ATM Withdrawal';
+    else if (/bill|utility|payment/i.test(body)) category = 'Bills';
+    else if (/cash advance/i.test(body)) category = 'Cash Advance';
+    else category = 'Other'; // make sure frontend shows Other
+  }
+
+  // -------- merchant / location --------
+  let merchant = null;
+  let merchantMatch =
+    body.match(/\bat\s+([A-Za-z0-9 &\-\.\(\)\/]+?)(?=(?: on |\d{2}\.\d{2}\.\d{2}|\d{2}\/\d{2}| \d{4}-\d{2}-\d{2}| using | via | Acc | Card |$|\.|,))/i) ||
+    body.match(/\bto\s+([A-Za-z0-9 &\-\.\(\)\/]+?)(?=(?: on |\d{2}\.\d{2}\.\d{2}|\d{2}\/\d{2}| \d{4}-\d{2}-\d{2}| using | via | Acc | Card |$|\.|,))/i) ||
+    body.match(/Location\s*:\s*([^,]+)/i);
+  if (merchantMatch && merchantMatch[1]) merchant = merchantMatch[1].trim();
 
   return {
     type,
-    category: 'Other', // ✅ Set category as 'Other'
-    merchant: location, // ✅ Store location separately
+    category,
+    merchant: merchant || 'Unknown',
     amount,
     description: sms,
     account: 'Bank',
-    smsDate: dateMatch ? dateMatch[1] : null,
-    smsTime: timeMatch ? timeMatch[1] : null,
   };
 };
 
 const tabs = ['Daily', 'Monthly', 'Summary'];
 
-/* --------------------------- More (Settings) Menu -------------------------- */
-const MoreMenu = ({ isOpen, onClose, onLogout }) => (
-  <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
-    <View style={styles.moreModalOverlay}>
-      <TouchableOpacity style={styles.moreBackdrop} onPress={onClose} activeOpacity={1} />
-      <View style={styles.moreMenu}>
-        <ScrollView style={styles.moreMenuContent}>
-          {/* Header */}
-          <View style={styles.moreMenuHeader}>
-            <View style={styles.profileSection}>
-              <View style={styles.profileImage}>
-                <Image
-                  source={require('./images/App_Logo.png')}
-                  style={styles.profileImageContent}
-                  resizeMode="cover"
-                />
+// More Menu Component (replacing the side menu)
+const MoreMenu = ({ isOpen, onClose, onLogout }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadUser = async () => {
+      try {
+        setLoading(true);
+
+        // 1) get auth user
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+
+        if (userErr) throw userErr;
+        if (!user) {
+          setName('');
+          setEmail('');
+          return;
+        }
+
+        setEmail(user.email ?? '');
+
+        // Prefer auth metadata if you stored it there
+        const metaName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.user_metadata?.username ||
+          '';
+
+        if (metaName) {
+          setName(metaName);
+          return;
+        }
+
+        // 2) try users table by id
+        const { data: profileById, error: errById } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (errById) {
+          console.log('profileById error =>', errById);
+        }
+
+        if (profileById?.name) {
+          setName(profileById.name);
+          return;
+        }
+
+        // 3) fallback: try by email (in case your users.id != auth uid)
+        const { data: profileByEmail, error: errByEmail } = await supabase
+          .from('users')
+          .select('name')
+          .eq('email', user.email)
+          .maybeSingle();
+
+        if (errByEmail) {
+          console.log('profileByEmail error =>', errByEmail);
+        }
+
+        setName(profileByEmail?.name || ''); // leave empty if not found
+      } catch (e) {
+        console.warn('Error loading profile', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUser();
+  }, [isOpen]);
+
+  return (
+    <Modal
+      visible={isOpen}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.moreModalOverlay}>
+        <TouchableOpacity 
+          style={styles.moreBackdrop} 
+          onPress={onClose}
+          activeOpacity={1}
+        />
+        
+        <View style={styles.moreMenu}>
+          <ScrollView style={styles.moreMenuContent}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.profileSection}>
+                <View style={styles.profileImage}>
+                  <Image
+                    source={require('./images/App_Logo.png')}
+                    style={styles.profileImageContent}
+                    resizeMode="cover"
+                  />
+                </View>
+
+                {loading ? (
+                  <ActivityIndicator size="small" color="#6B7280" />
+                ) : (
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.profileName}>{name || '—'}</Text>
+                    <Text style={styles.profileEmail}>{email}</Text>
+                  </View>
+                )}
               </View>
-              <View className="profileInfo">
-                <Text style={styles.profileName}>Amar Bazlin</Text>
-                <Text style={styles.profileEmail}>aamarbazlin@gmail.com</Text>
-              </View>
+
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <X size={20} color="#6B7280" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <X size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
 
-          {/* Menu Items */}
-          <View style={styles.menuItems}>
-            <TouchableOpacity style={styles.menuItem}>
-              <Lock size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Passcode</Text>
-                <Text style={styles.menuItemSubtitle}>OFF</Text>
-              </View>
-            </TouchableOpacity>
+            {/* Menu Items */}
+            <View style={styles.menuItems}>
+              <TouchableOpacity style={styles.menuItem}>
+                <Lock size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Passcode</Text>
+                  <Text style={styles.menuItemSubtitle}>OFF</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
-                <Text style={styles.menuItemSubtitle}>LKR (Rs.)</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
+                  <Text style={styles.menuItemSubtitle}>LKR(Rs.)</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Bell size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Alarm Setting</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Bell size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Alarm Setting</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Palette size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Style</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Palette size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Style</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Globe size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Language Setting</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Globe size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Language Setting</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.menuItem, styles.logoutItem]} onPress={onLogout}>
-              <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.logoutText}>Logout</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+              <TouchableOpacity 
+                style={[styles.menuItem, styles.logoutItem]}
+                onPress={onLogout}
+              >
+                <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.logoutText}>Logout</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
       </View>
-    </View>
-  </Modal>
-);
+    </Modal>
+  );
+};
 
 /* ------------------------------- Main Screen ------------------------------- */
 export default function TransactionsScreen({ onBack, onLogout }) {
   const navigation = useNavigation();
 
   const isSubmittingRef = useRef(false);
-  const alertLockRef = useRef(false); // 🔧 FIX: prevent duplicate Alert
+  const alertLockRef = useRef(false);
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-  const [activeTab] = useState('Transactions');
   const [selectedTab, setSelectedTab] = useState('Daily');
 
   const [transactions, setTransactions] = useState([]);
@@ -196,29 +382,19 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
   /* -------------------------------- Helpers -------------------------------- */
 
-  // 🔧 FIX: safe alert (fires once until user dismisses)
   const safeAlert = useCallback((title, message) => {
     if (alertLockRef.current) return;
     alertLockRef.current = true;
     Alert.alert(title, message, [
-      {
-        text: 'OK',
-        onPress: () => {
-          alertLockRef.current = false;
-        },
-      },
+      { text: 'OK', onPress: () => { alertLockRef.current = false; } },
     ]);
   }, []);
 
   const confirmDelete = (tx) => {
-    Alert.alert(
-      'Delete',
-      'Are you sure you want to delete this transaction?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteTransaction(tx) },
-      ]
-    );
+    Alert.alert('Delete', 'Are you sure you want to delete this transaction?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteTransaction(tx) },
+    ]);
   };
 
   const deleteTransaction = async (tx) => {
@@ -241,24 +417,18 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   };
 
   const startEdit = (tx) => {
-  // ✅ Pre-populate the form with transaction data
-  const editTransaction = {
-    ...tx,
-    // Ensure account is set correctly for SMS transactions
-    account: tx.payment_method === 'Bank' ? 'Bank' : (tx.payment_method || 'Cash'),
-    // Keep the formatted category (e.g., "Other - ARPICO-HYDE PARK")
-    category: tx.category,
+    const editTransaction = {
+      ...tx,
+      account: tx.payment_method === 'Bank' ? 'Bank' : (tx.payment_method || 'Cash'),
+      category: tx.category,
+    };
+    setEditTx(editTransaction);
+    setShowTransactionForm(true);
   };
-  
-  setEditTx(editTransaction);
-  setShowTransactionForm(true);
-};
 
   const handleTransactionAdded = useCallback(async (t) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
-
-    console.log('[handleTransactionAdded] fired once'); // debug
 
     try {
       const { data: { user }, error: userErr } = await supabase.auth.getUser();
@@ -268,6 +438,10 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       }
 
       const amt = Number(t.amount);
+      if (!isFinite(amt)) {
+        throw new Error('Parsed amount is invalid');
+      }
+
       let catId = t.category_id ?? null;
 
       if (!catId && t.category) {
@@ -276,28 +450,40 @@ export default function TransactionsScreen({ onBack, onLogout }) {
           .select('id')
           .eq('name', t.category)
           .maybeSingle();
-        if (catErr) console.warn(catErr);
-        catId = catRow?.id ?? null;
+        if (!catErr && catRow?.id) {
+          catId = catRow.id;
+        } else {
+          // fallback try to find "Other"
+          const { data: otherRow } = await supabase
+            .from('categories')
+            .select('id')
+            .eq('name', 'Other')
+            .maybeSingle();
+          if (otherRow?.id) catId = otherRow.id;
+        }
       }
+
+      const localDate = t.date || ymdLocal(new Date());
 
       if (t.type === 'income') {
         const { error } = await supabase.from('income').insert([{
           user_id: user.id,
           source: t.category || 'Other',
           amount: amt,
-          date: new Date().toISOString().slice(0, 10),
+          date: localDate,
           note: t.note || null,
+          description: t.description || null,
         }]);
         if (error) throw error;
       } else {
         const { error } = await supabase.from('expenses').insert([{
           user_id: user.id,
-          category_id: catId,
+          category_id: catId, // may be null, view will give category null -> we fallback to "Other" in UI
           amount: amt,
           payment_method: t.account || 'Cash',
-          note: t.note || (t.merchant ? `Location: ${t.merchant}` : null), // ✅ Store merchant in note
+          note: t.note || (t.merchant ? `Location: ${t.merchant}` : null),
           description: t.description || null,
-          date: new Date().toISOString().slice(0, 10),
+          date: localDate,
         }]);
         if (error) throw error;
       }
@@ -316,9 +502,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const handleTransactionUpdated = useCallback(async (payload) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
-
-    console.log('[handleTransactionUpdated] fired once'); // debug
-
     try {
       const { error } = await supabase.rpc('update_transaction', {
         t_type: editTx.type,
@@ -346,7 +529,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const fetchCategories = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('categories').select('*');
-      if (error) throw error;
+    if (error) throw error;
       setCategories(data || []);
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -358,14 +541,13 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       const { data: { user } } = await supabase.auth.getUser();
 
       const { data, error } = await supabase
-        .from('transactions') // DB view
+        .from('transactions') // DB view MUST expose `date`
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('date', { ascending: false });
 
       if (error) throw error;
 
-      // 🔧 FIX: hard de-dup (type + id) to avoid any view duplication showing twice
       const seen = new Set();
       const deduped = [];
       for (const t of (data || [])) {
@@ -382,10 +564,10 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     }
   }, [safeAlert]);
 
-  /** Calculate month totals (ONLY current month) */
+  /** Calculate month totals using the LOCAL date field */
   const calculateMonthTotals = useCallback((transactionData) => {
     const monthTx = transactionData.filter(t => {
-      const dt = new Date(t.created_at);
+      const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
       return dt >= monthStart && dt < nextMonthStart;
     });
 
@@ -406,8 +588,8 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
     const monthlyStats = monthNames.map((month, index) => {
       const monthTransactions = transactions.filter(transaction => {
-        const transactionDate = new Date(transaction.created_at);
-        return transactionDate.getFullYear() === currentYear && transactionDate.getMonth() === index;
+        const dt = transaction.date ? new Date(`${transaction.date}T00:00:00`) : new Date();
+        return dt.getFullYear() === currentYear && dt.getMonth() === index;
       });
 
       const monthIncome = monthTransactions
@@ -433,15 +615,17 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     setMonthlyData(monthlyStats);
   }, [transactions, currentYear]);
 
-  const getDailyTotals = useCallback((date = new Date()) => {  // ✅ Add default parameter
-  const y = date.getFullYear();
-  const m = date.getMonth();
-  const d = date.getDate();
+  const getDailyTotals = useCallback((date = new Date()) => {
+    const y = date.getFullYear();
+    const m = date.getMonth();
+    const d = date.getDate();
     let incomeDay = 0, expenseDay = 0;
 
+    const todayKey = ymdLocal(new Date(y, m, d));
+
     transactions.forEach(t => {
-      const dt = new Date(t.created_at);
-      if (dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d) {
+      const key = t.date || ymdLocal(new Date());
+      if (key === todayKey) {
         if (t.type === 'income') incomeDay += Number(t.amount) || 0;
         else expenseDay += Number(t.amount) || 0;
       }
@@ -452,58 +636,53 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
   /* ----- Current month filtered transactions (for Daily tab) + Group by day ---- */
   const currentMonthTransactions = useMemo(() => {
-
-    
     return transactions.filter(t => {
-      const dt = new Date(t.created_at);
+      const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
       return dt >= monthStart && dt < nextMonthStart;
     });
   }, [transactions, monthStart, nextMonthStart]);
 
+  // 👉 STRICTLY use t.date to group (no UTC problems)
   const dailySections = useMemo(() => {
-  const map = new Map(); // key: yyyy-mm-dd => items
-  currentMonthTransactions.forEach(t => {
-    const dt = new Date(t.created_at);
-    const key = dt.toISOString().slice(0, 10);
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(t);
-  });
-
-  const sections = Array.from(map.entries())
-    .sort(([a], [b]) => (a > b ? -1 : 1)) // desc
-    .map(([dateKey, items]) => {
-      const incomeDay = items
-        .filter(x => x.type === 'income')
-        .reduce((s, x) => s + Number(x.amount || 0), 0);
-      const expenseDay = items
-        .filter(x => x.type === 'expense')
-        .reduce((s, x) => s + Number(x.amount || 0), 0);
-
-      // ✅ Fix date parsing with explicit timezone handling
-      const [year, month, day] = dateKey.split('-');
-      const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-      
-      return {
-        title: dateKey,
-        dayNumber: d.getDate(),
-        weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
-        incomeDay,
-        expenseDay,
-        data: items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
-      };
+    const map = new Map();
+    currentMonthTransactions.forEach(t => {
+      const key = t.date || ymdLocal(new Date());
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
     });
 
-  return sections;
-}, [currentMonthTransactions]);
+    const sections = Array.from(map.entries())
+      .sort(([a], [b]) => (a > b ? -1 : 1)) // desc by date string
+      .map(([dateKey, items]) => {
+        const [year, month, day] = dateKey.split('-');
+        const d = new Date(Number(year), Number(month) - 1, Number(day));
 
+        const incomeDay = items
+          .filter(x => x.type === 'income')
+          .reduce((s, x) => s + Number(x.amount || 0), 0);
+        const expenseDay = items
+          .filter(x => x.type === 'expense')
+          .reduce((s, x) => s + Number(x.amount || 0), 0);
 
-  const { incomeDay, expenseDay } = getDailyTotals(new Date());  // ✅ Use fresh date
+        return {
+          title: dateKey,
+          dayNumber: d.getDate(),
+          weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
+          incomeDay,
+          expenseDay,
+          data: items,
+        };
+      });
 
+    return sections;
+  }, [currentMonthTransactions]);
+
+  const { incomeDay, expenseDay } = getDailyTotals(new Date());
 
   /* --------------------------- Category Remaining -------------------------- */
   const getRemainingForCategory = useCallback((categoryName) => {
-    if (!categoryName) return null;
-    const cat = categories.find(c => c.name === categoryName);
+    const name = categoryName || 'Other';
+    const cat = categories.find(c => c.name === name);
     if (!cat || typeof cat.budget_limit !== 'number') return null;
 
     const now = new Date();
@@ -511,8 +690,8 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     const spent = transactions
       .filter(t =>
         t.type === 'expense' &&
-        t.category === categoryName &&
-        new Date(t.created_at) >= start
+        (t.category || 'Other') === name &&
+        (t.date ? new Date(`${t.date}T00:00:00`) : new Date()) >= start
       )
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
@@ -546,19 +725,18 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const readBankMessages = useCallback(async () => {
     if (Platform.OS !== 'android' || !SmsAndroid) return;
 
-    console.log('[SMS] Starting to read bank messages…');
-
     const existingBodies = new Set(transactions.map(t => t.description));
     let inserted = 0;
 
     const bankSenders = [
-      'BOC', 'HNB', 'COMBANK', 'NTB', 'SAMPATH', 'DFCC', 'NSB', 'SEYLAN', 'UB',
-      'PAN ASIA', 'HSBC', 'CARGILLS', 'STANDARDCHARTERED', 'MCB', 'NDB', 'PB'
+      'COMBANK', 'CMB', 'HNB', 'SAMPATH', 'BOC', 'PEOPLES', 'PB', 'NDB', 'SEYLAN',
+      'DFCC', 'NTB', 'AMEX', 'NTBAMEX', 'PABC', 'PAN ASIA', 'PANASIA', 'UNION',
+      'UB', 'UBL', 'HSBC', 'SCB', 'STANDARDCHARTERED', 'NSB', 'CARGILLS'
     ];
 
     try {
       for (const sender of bankSenders) {
-        const filter = { box: 'inbox', address: sender, maxCount: 20 };
+        const filter = { box: 'inbox', address: sender, maxCount: 50 };
 
         await new Promise((resolve) => {
           SmsAndroid.list(
@@ -586,11 +764,12 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
                   await handleTransactionAdded({
                     type: parsed.type,
-                    category: parsed.category, // 'Other'
-                    merchant: parsed.merchant, // 'KEELLS SUPER - DARLEY ROA'
+                    category: parsed.category,
+                    merchant: parsed.merchant,
                     amount: parsed.amount,
                     description: msg.body,
                     account: parsed.account,
+                    date: ymdLocal(new Date()), // you can parse the SMS date later
                   });
 
                   existingBodies.add(msg.body);
@@ -616,25 +795,26 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   }, [transactions, handleTransactionAdded, safeAlert]);
 
   const handleManualSmsImport = () => {
-  if (!smsText.trim()) {
-    safeAlert('Error', 'Please enter the SMS text.');
-    return;
-  }
-  const parsed = parseBankSMS(smsText);
-  if (!parsed) {
-    safeAlert('Error', 'Could not parse SMS text.');
-    return;
-  }
-  handleTransactionAdded({
-  type: parsed.type,
-  category: parsed.category, // 'Other'
-  merchant: parsed.merchant, // Location name
-  amount: parsed.amount,
-  description: smsText,
-  account: parsed.account,
-});
-  setSmsText('');
-};
+    if (!smsText.trim()) {
+      safeAlert('Error', 'Please enter the SMS text.');
+      return;
+    }
+    const parsed = parseBankSMS(smsText);
+    if (!parsed) {
+      safeAlert('Error', 'Could not parse SMS text.');
+      return;
+    }
+    handleTransactionAdded({
+      type: parsed.type,
+      category: parsed.category,
+      merchant: parsed.merchant,
+      amount: parsed.amount,
+      description: smsText,
+      account: parsed.account,
+      date: ymdLocal(new Date()),
+    });
+    setSmsText('');
+  };
 
   /* --------------------------------- Effects -------------------------------- */
   useEffect(() => {
@@ -663,7 +843,8 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   };
 
   const getCategoryIcon = (categoryName) => {
-    const category = categories.find(cat => cat.name === categoryName);
+    const name = categoryName || 'Other';
+    const category = categories.find(cat => cat.name === name);
     return category?.icon || '💳';
   };
 
@@ -689,19 +870,27 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     setShowTransactionForm(true);
   };
 
-  const openTransactionDetails = (tx) => {
-    setSelectedTransaction(tx);
-  };
-
+  const openTransactionDetails = (tx) => setSelectedTransaction(tx);
   const closeTransactionDetails = () => setSelectedTransaction(null);
 
   const renderTransaction = ({ item }) => {
     const isIncome = item.type === 'income';
     const amount = Number(item.amount) || 0;
-    const categoryEmoji = getCategoryIcon(item.category);
+    const displayCategory = item.category || 'Other';
+    const categoryEmoji = getCategoryIcon(displayCategory);
     const isFromSMS =
       (item.payment_method && item.payment_method.toLowerCase() === 'bank') ||
       item.source === 'sms';
+
+    const leftTitle = (() => {
+      const location =
+        item.note && item.note.startsWith('Location: ')
+          ? item.note.replace('Location: ', '')
+          : null;
+      return location
+        ? `${displayCategory} - ${location}`
+        : displayCategory;
+    })();
 
     return (
       <TouchableOpacity onPress={() => openTransactionDetails(item)}>
@@ -711,19 +900,16 @@ export default function TransactionsScreen({ onBack, onLogout }) {
               <Text style={styles.categoryEmoji}>{categoryEmoji}</Text>
             </View>
 
-            <View>
-              <Text style={styles.transactionCategory}>
-                {/* ✅ Extract location from note for SMS transactions */}
-                {(() => {
-                  if (isFromSMS && item.note && item.note.startsWith('Location: ')) {
-                    const location = item.note.replace('Location: ', '');
-                    return `${item.category} - ${location}`;
-                  }
-                  return item.category;
-                })()}{' '}
+            <View style={styles.transactionTextWrap}>
+              <Text
+                style={styles.transactionCategory}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {leftTitle}{' '}
                 {isFromSMS && <Text style={{ fontSize: 12, color: '#008080' }}>• SMS</Text>}
               </Text>
-              <Text style={styles.transactionMethod}>
+              <Text style={styles.transactionMethod} numberOfLines={1} ellipsizeMode="tail">
                 {item.payment_method || 'Cash'}
               </Text>
             </View>
@@ -770,35 +956,34 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   );
 
   const renderSectionHeader = ({ section, index }) => {
-  // ✅ Recalculate the date and weekday from the section title
-  const sectionDate = new Date(section.title + 'T12:00:00'); // Force midday to avoid timezone issues
-  const dayNumber = sectionDate.getDate();
-  const weekday = sectionDate.toLocaleDateString('en-US', { weekday: 'short' });
-  
-  const headerStyle = index % 2 === 0 ? styles.dayHeaderAltA : styles.dayHeaderAltB;
-  return (
-    <View style={[styles.dayHeader, headerStyle]}>
-      <View style={styles.dayHeaderLeft}>
-        <Text style={styles.dayNumber}>{dayNumber}</Text>
-        <Text style={styles.dayLabel}>{weekday}</Text>
-      </View>
+    const [year, month, day] = section.title.split('-');
+    const sectionDate = new Date(Number(year), Number(month) - 1, Number(day));
+    const dayNumber = sectionDate.getDate();
+    const weekday = sectionDate.toLocaleDateString('en-US', { weekday: 'short' });
 
-      <View style={styles.dayHeaderRight}>
-        <View style={styles.badgeIncome}>
-          <Text style={styles.badgeText}>+ Rs. {section.incomeDay.toFixed(2)}</Text>
+    const headerStyle = index % 2 === 0 ? styles.dayHeaderAltA : styles.dayHeaderAltB;
+    return (
+      <View style={[styles.dayHeader, headerStyle]}>
+        <View style={styles.dayHeaderLeft}>
+          <Text style={styles.dayNumber}>{dayNumber}</Text>
+          <Text style={styles.dayLabel}>{weekday}</Text>
         </View>
-        <View style={styles.badgeExpense}>
-          <Text style={styles.badgeText}>- Rs. {section.expenseDay.toFixed(2)}</Text>
+
+        <View style={styles.dayHeaderRight}>
+          <View style={styles.badgeIncome}>
+            <Text style={styles.badgeText}>+ Rs. {section.incomeDay.toFixed(2)}</Text>
+          </View>
+          <View style={styles.badgeExpense}>
+            <Text style={styles.badgeText}>- Rs. {section.expenseDay.toFixed(2)}</Text>
+          </View>
         </View>
       </View>
-    </View>
-  );
-};
+    );
+  };
 
   /* ------------------------------- Main render ------------------------------ */
   return (
     <SafeAreaView style={styles.container}>
-
       <StatusBar barStyle="dark-content" backgroundColor="#008080" />
       {/* Header */}
       <View style={styles.header}>
@@ -843,7 +1028,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       {importedFromSMS > 0 && (
         <View style={{ backgroundColor: '#E6FFFA', padding: 8 }}>
           <Text style={{ color: '#008080', textAlign: 'center' }}>
-            {importedFromSMS} transactions imported from SMS
+            {importedFromSMS} transaction{importedFromSMS > 1 ? 's' : ''} imported from SMS
           </Text>
         </View>
       )}
@@ -908,7 +1093,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
           ) : (
             <SectionList
               sections={dailySections}
-              keyExtractor={(item) => `${item.type}:${item.id}`} // 🔧 FIX: unique, stable key
+              keyExtractor={(item) => `${item.type}:${item.id}`}
               renderItem={renderTransaction}
               renderSectionHeader={renderSectionHeader}
               stickySectionHeadersEnabled={false}
@@ -936,11 +1121,11 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       </TouchableOpacity>
 
       {/* Add/Edit Form */}
-     <TransactionForm
+      <TransactionForm
         visible={showTransactionForm}
         mode={editTx ? 'edit' : 'add'}
         existingTx={editTx}
-        editTransaction={editTx} // ✅ Add this prop
+        editTransaction={editTx}
         onClose={() => { setShowTransactionForm(false); setEditTx(null); }}
         onBack={() => { setShowTransactionForm(false); setEditTx(null); }}
         onTransactionComplete={handleTransactionAdded}
@@ -960,7 +1145,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
             <Text style={styles.detailLine}>
               <Text style={styles.detailLabel}>Category: </Text>
-              {selectedTransaction?.category ?? '-'}
+              {(selectedTransaction?.category || 'Other')}
             </Text>
 
             <Text style={styles.detailLine}>
@@ -979,10 +1164,8 @@ export default function TransactionsScreen({ onBack, onLogout }) {
             </Text>
 
             <Text style={styles.detailLine}>
-              <Text style={styles.detailLabel}>Date & Time: </Text>
-              {selectedTransaction?.created_at
-                ? new Date(selectedTransaction.created_at).toLocaleString()
-                : '-'}
+              <Text style={styles.detailLabel}>Date: </Text>
+              {selectedTransaction?.date ?? '-'}
             </Text>
 
             {selectedTransaction?.description ? (
@@ -1241,7 +1424,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
     backgroundColor: 'white',
   },
-  transactionLeft: { flexDirection: 'row', alignItems: 'center' },
+  transactionLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   emojiContainer: {
     width: 40,
     height: 40,
@@ -1249,11 +1432,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 15,
+    marginRight: 12,
   },
   categoryEmoji: { fontSize: 20 },
-  transactionCategory: { fontSize: 16, fontWeight: '500', color: '#333' },
-  transactionMethod: { fontSize: 14, color: '#666', marginTop: 2 },
+  transactionTextWrap: { flex: 1, minWidth: 0 },
+  transactionCategory: { fontSize: 16, fontWeight: '500', color: '#333', flexShrink: 1 },
+  transactionMethod: { fontSize: 14, color: '#666', marginTop: 2, flexShrink: 1 },
+  rowRight: { alignItems: 'flex-end', marginLeft: 8, minWidth: 90 },
   transactionAmount: { fontSize: 16, fontWeight: '500' },
 
   addButton: {
@@ -1293,37 +1478,26 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  moreBackdrop: {
-    flex: 1,
-  },
+  moreBackdrop: { flex: 1 },
   moreMenu: {
     backgroundColor: 'white',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '80%',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: -2,
-    },
+    shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  moreMenuContent: {
-    padding: 24,
-  },
+  moreMenuContent: { padding: 24 },
   moreMenuHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 32,
   },
-  profileSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
+  profileSection: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   profileImage: {
     width: 48,
     height: 48,
@@ -1332,28 +1506,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginRight: 12,
   },
-  profileImageContent: {
-    width: '100%',
-    height: '100%',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  profileEmail: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  menuItems: {
-    flex: 1,
-  },
+  profileImageContent: { width: '100%', height: '100%' },
+  profileName: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
+  profileEmail: { fontSize: 14, color: '#6B7280' },
+  closeButton: { padding: 8 },
+  menuItems: { flex: 1 },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1362,30 +1519,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 4,
   },
-  menuIcon: {
-    marginRight: 16,
-  },
-  menuItemContent: {
-    flex: 1,
-  },
-  menuItemTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  menuItemSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  logoutItem: {
-    marginTop: 32,
-    backgroundColor: '#FEF2F2',
-  },
-  logoutText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#EF4444',
-  },
+  menuIcon: { marginRight: 16 },
+  menuItemContent: { flex: 1 },
+  menuItemTitle: { fontSize: 16, fontWeight: '500', color: '#1F2937' },
+  menuItemSubtitle: { fontSize: 14, color: '#6B7280' },
+  logoutItem: { marginTop: 32, backgroundColor: '#FEF2F2' },
+  logoutText: { fontSize: 16, fontWeight: '500', color: '#EF4444' },
+
   // Action Sheet
   actionsOverlay: {
     flex: 1,
@@ -1398,16 +1538,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
   },
-  rowRight: {
-    alignItems: 'flex-end',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    marginTop: 6,
-  },
-  actionBtn: {
-    paddingHorizontal: 6,
-  },
+  actionsRow: { flexDirection: 'row', marginTop: 6 },
+  actionBtn: { paddingHorizontal: 6 },
   actionBtnSheet: { paddingVertical: 16, alignItems: 'center' },
   actionEdit: { color: '#008080', fontSize: 16, fontWeight: '600' },
   actionDelete: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },

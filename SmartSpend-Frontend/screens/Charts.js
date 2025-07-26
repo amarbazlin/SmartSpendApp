@@ -64,97 +64,187 @@ function hexToRgba(hex, alpha = 1) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// ─────────────────────  OPTIONAL: same More menu UI you used  ─────────────────────
-const MoreMenu = ({ isOpen, onClose, onLogout }) => (
-  <Modal
-    visible={isOpen}
-    transparent
-    animationType="fade"
-    onRequestClose={onClose}
-  >
-    <View style={styles.moreModalOverlay}>
-      <TouchableOpacity style={styles.moreBackdrop} onPress={onClose} activeOpacity={1} />
-      <View style={styles.moreMenu}>
-        <ScrollView style={styles.moreMenuContent}>
-          <View style={styles.moreMenuHeader}>
-            <View style={styles.profileSection}>
-              <View style={styles.profileImage}>
-                <Image
-                  source={require('./images/App_Logo.png')}
-                  style={styles.profileImageContent}
-                  resizeMode="cover"
-                />
+// More Menu Component (replacing the side menu)
+const MoreMenu = ({ isOpen, onClose, onLogout }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadUser = async () => {
+      try {
+        setLoading(true);
+
+        // 1) get auth user
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+
+        if (userErr) throw userErr;
+        if (!user) {
+          setName('');
+          setEmail('');
+          return;
+        }
+
+        setEmail(user.email ?? '');
+
+        // Prefer auth metadata if you stored it there
+        const metaName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.user_metadata?.username ||
+          '';
+
+        if (metaName) {
+          setName(metaName);
+          return;
+        }
+
+        // 2) try users table by id
+        const { data: profileById, error: errById } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (errById) {
+          console.log('profileById error =>', errById);
+        }
+
+        if (profileById?.name) {
+          setName(profileById.name);
+          return;
+        }
+
+        // 3) fallback: try by email (in case your users.id != auth uid)
+        const { data: profileByEmail, error: errByEmail } = await supabase
+          .from('users')
+          .select('name')
+          .eq('email', user.email)
+          .maybeSingle();
+
+        if (errByEmail) {
+          console.log('profileByEmail error =>', errByEmail);
+        }
+
+        setName(profileByEmail?.name || ''); // leave empty if not found
+      } catch (e) {
+        console.warn('Error loading profile', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUser();
+  }, [isOpen]);
+
+  return (
+    <Modal
+      visible={isOpen}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.moreModalOverlay}>
+        <TouchableOpacity 
+          style={styles.moreBackdrop} 
+          onPress={onClose}
+          activeOpacity={1}
+        />
+        
+        <View style={styles.moreMenu}>
+          <ScrollView style={styles.moreMenuContent}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.profileSection}>
+                <View style={styles.profileImage}>
+                  <Image
+                    source={require('./images/App_Logo.png')}
+                    style={styles.profileImageContent}
+                    resizeMode="cover"
+                  />
+                </View>
+
+                {loading ? (
+                  <ActivityIndicator size="small" color="#6B7280" />
+                ) : (
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.profileName}>{name || '—'}</Text>
+                    <Text style={styles.profileEmail}>{email}</Text>
+                  </View>
+                )}
               </View>
-              <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>Amar Bazlin</Text>
-                <Text style={styles.profileEmail}>aamarbazlin.com</Text>
-              </View>
+
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <X size={20} color="#6B7280" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <X size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
 
-          <View style={styles.menuItems}>
-            <TouchableOpacity style={styles.menuItem}>
-              <Lock size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Passcode</Text>
-                <Text style={styles.menuItemSubtitle}>OFF</Text>
-              </View>
-            </TouchableOpacity>
+            {/* Menu Items */}
+            <View style={styles.menuItems}>
+              <TouchableOpacity style={styles.menuItem}>
+                <Lock size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Passcode</Text>
+                  <Text style={styles.menuItemSubtitle}>OFF</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
-                <Text style={styles.menuItemSubtitle}>LKR (Rs.)</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
+                  <Text style={styles.menuItemSubtitle}>LKR(Rs.)</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Bell size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Alarm Setting</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Bell size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Alarm Setting</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Palette size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Style</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Palette size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Style</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
-              <Globe size={20} color="#6B7280" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.menuItemTitle}>Language Setting</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem}>
+                <Globe size={20} color="#6B7280" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.menuItemTitle}>Language Setting</Text>
+                </View>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.menuItem, styles.logoutItem]}
-              onPress={onLogout}
-            >
-              <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
-              <View style={styles.menuItemContent}>
-                <Text style={styles.logoutText}>Logout</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+              <TouchableOpacity 
+                style={[styles.menuItem, styles.logoutItem]}
+                onPress={onLogout}
+              >
+                <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
+                <View style={styles.menuItemContent}>
+                  <Text style={styles.logoutText}>Logout</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
       </View>
-    </View>
-  </Modal>
-);
+    </Modal>
+  );
+};
 
 // ──────────────────────────  MAIN SCREEN  ──────────────────────────
 export default function ChartsScreen({ onBack, onTransactions, onLogout }) {

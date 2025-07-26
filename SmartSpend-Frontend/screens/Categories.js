@@ -24,6 +24,7 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
+  
 } from 'react-native';
 import {
   Home,
@@ -64,27 +65,100 @@ const Icon = ({ name, size = 24, color = '#000' }) => {
 /* ------------------------------------------------------------------ */
 /* --------------------------- MORE MENU ---------------------------- */
 /* ------------------------------------------------------------------ */
+// More Menu Component (replacing the side menu)
 const MoreMenu = ({ isOpen, onClose, onLogout }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadUser = async () => {
+      try {
+        setLoading(true);
+
+        // 1) get auth user
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+
+        if (userErr) throw userErr;
+        if (!user) {
+          setName('');
+          setEmail('');
+          return;
+        }
+
+        setEmail(user.email ?? '');
+
+        // Prefer auth metadata if you stored it there
+        const metaName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.user_metadata?.username ||
+          '';
+
+        if (metaName) {
+          setName(metaName);
+          return;
+        }
+
+        // 2) try users table by id
+        const { data: profileById, error: errById } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (errById) {
+          console.log('profileById error =>', errById);
+        }
+
+        if (profileById?.name) {
+          setName(profileById.name);
+          return;
+        }
+
+        // 3) fallback: try by email (in case your users.id != auth uid)
+        const { data: profileByEmail, error: errByEmail } = await supabase
+          .from('users')
+          .select('name')
+          .eq('email', user.email)
+          .maybeSingle();
+
+        if (errByEmail) {
+          console.log('profileByEmail error =>', errByEmail);
+        }
+
+        setName(profileByEmail?.name || ''); // leave empty if not found
+      } catch (e) {
+        console.warn('Error loading profile', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUser();
+  }, [isOpen]);
+
   return (
     <Modal
       visible={isOpen}
-      transparent
+      transparent={true}
       animationType="fade"
       onRequestClose={onClose}
-      presentationStyle="overFullScreen"
     >
       <View style={styles.moreModalOverlay}>
-        <TouchableOpacity
-          style={styles.moreBackdrop}
+        <TouchableOpacity 
+          style={styles.moreBackdrop} 
           onPress={onClose}
           activeOpacity={1}
         />
+        
         <View style={styles.moreMenu}>
-          <ScrollView
-          style={styles.moreMenuContent}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="none"
-          >
+          <ScrollView style={styles.moreMenuContent}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.profileSection}>
                 <View style={styles.profileImage}>
@@ -94,16 +168,23 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                     resizeMode="cover"
                   />
                 </View>
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>Amar Bazlin</Text>
-                  <Text style={styles.profileEmail}>aamarbazl.com</Text>
-                </View>
+
+                {loading ? (
+                  <ActivityIndicator size="small" color="#6B7280" />
+                ) : (
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.profileName}>{name || '—'}</Text>
+                    <Text style={styles.profileEmail}>{email}</Text>
+                  </View>
+                )}
               </View>
+
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <X size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
+            {/* Menu Items */}
             <View style={styles.menuItems}>
               <TouchableOpacity style={styles.menuItem}>
                 <Lock size={20} color="#6B7280" style={styles.menuIcon} />
@@ -149,7 +230,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity
+              <TouchableOpacity 
                 style={[styles.menuItem, styles.logoutItem]}
                 onPress={onLogout}
               >
@@ -165,6 +246,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
     </Modal>
   );
 };
+
 
 /* ------------------------------------------------------------------ */
 /* ---------------------- CATEGORY FORM MODAL ----------------------- */

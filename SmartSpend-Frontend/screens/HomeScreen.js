@@ -11,6 +11,7 @@ import {
   StatusBar,
   Modal,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { 
   Home, 
@@ -43,6 +44,82 @@ const { width } = Dimensions.get('window');
 
 // More Menu Component (replacing the side menu)
 const MoreMenu = ({ isOpen, onClose, onLogout }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadUser = async () => {
+      try {
+        setLoading(true);
+
+        // 1) get auth user
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+
+        if (userErr) throw userErr;
+        if (!user) {
+          setName('');
+          setEmail('');
+          return;
+        }
+
+        setEmail(user.email ?? '');
+
+        // Prefer auth metadata if you stored it there
+        const metaName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.user_metadata?.username ||
+          '';
+
+        if (metaName) {
+          setName(metaName);
+          return;
+        }
+
+        // 2) try users table by id
+        const { data: profileById, error: errById } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (errById) {
+          console.log('profileById error =>', errById);
+        }
+
+        if (profileById?.name) {
+          setName(profileById.name);
+          return;
+        }
+
+        // 3) fallback: try by email (in case your users.id != auth uid)
+        const { data: profileByEmail, error: errByEmail } = await supabase
+          .from('users')
+          .select('name')
+          .eq('email', user.email)
+          .maybeSingle();
+
+        if (errByEmail) {
+          console.log('profileByEmail error =>', errByEmail);
+        }
+
+        setName(profileByEmail?.name || ''); // leave empty if not found
+      } catch (e) {
+        console.warn('Error loading profile', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUser();
+  }, [isOpen]);
+
   return (
     <Modal
       visible={isOpen}
@@ -57,10 +134,8 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
           activeOpacity={1}
         />
         
-        {/* More Menu */}
         <View style={styles.moreMenu}>
           <ScrollView style={styles.moreMenuContent}>
-            {/* Header */}
             <View style={styles.moreMenuHeader}>
               <View style={styles.profileSection}>
                 <View style={styles.profileImage}>
@@ -70,11 +145,17 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                     resizeMode="cover"
                   />
                 </View>
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>Amar Bazlin</Text>
-                  <Text style={styles.profileEmail}>aamarbazlin@gmail.com</Text>
-                </View>
+
+                {loading ? (
+                  <ActivityIndicator size="small" color="#6B7280" />
+                ) : (
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.profileName}>{name || '—'}</Text>
+                    <Text style={styles.profileEmail}>{email}</Text>
+                  </View>
+                )}
               </View>
+
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <X size={20} color="#6B7280" />
               </TouchableOpacity>
@@ -82,7 +163,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
 
             {/* Menu Items */}
             <View style={styles.menuItems}>
-              {/* Passcode Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Lock size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -91,7 +171,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Main Currency Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -100,7 +179,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Sub Currency Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -108,7 +186,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Alarm Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Bell size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -116,7 +193,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Style */}
               <TouchableOpacity style={styles.menuItem}>
                 <Palette size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -124,7 +200,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Language Setting */}
               <TouchableOpacity style={styles.menuItem}>
                 <Globe size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
@@ -132,7 +207,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Logout */}
               <TouchableOpacity 
                 style={[styles.menuItem, styles.logoutItem]}
                 onPress={onLogout}

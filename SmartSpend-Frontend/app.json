@@ -2,7 +2,7 @@
   "expo": {
     "name": "SmartSpendApp",
     "slug": "SmartSpendApp",
-    "icon": "./screens/images/App_Logo.png",
+    "icon": "./screens/images/App_Logo_imresizer.png",
     "version": "1.0.0",
     "sdkVersion": "51.0.0",
     "orientation": "portrait",
@@ -46,6 +46,9 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
+    },
+    "android": {
+      "package": "com.amarbazlin.SmartSpendApp"
     }
   }
 }
