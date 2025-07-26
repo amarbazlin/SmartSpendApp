@@ -1,3 +1,4 @@
+// screens/AuthScreen.js
 import React, { useState } from 'react';
 import {
   View,
@@ -7,85 +8,180 @@ import {
   StyleSheet,
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { supabase } from '../services/supabase';
 
-export default function RegisterScreen({ onRegister, onLogin, onSwitchToLogin }) {
-  const [isRegistering, setIsRegistering] = useState(true); // toggle between register and login
+export default function AuthScreen() {
+  const [isRegistering, setIsRegistering] = useState(true);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const handleAction = () => {
+  const validate = () => {
     if (!email || !password || (isRegistering && !name)) {
       Alert.alert('Please fill all required fields.');
-      return;
+      return false;
     }
+    // basic email check
+    const emailOk = /\S+@\S+\.\S+/.test(email);
+    if (!emailOk) {
+      Alert.alert('Enter a valid email.');
+      return false;
+    }
+    if (password.length < 6) {
+      Alert.alert('Password must be at least 6 characters.');
+      return false;
+    }
+    return true;
+  };
 
-    if (isRegistering) {
-      onRegister(name, email, password);
-    } else {
-      onLogin(email, password);
+  const handleRegister = async () => {
+    if (!validate()) return;
+    try {
+      setBusy(true);
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name }, // store in auth.user.user_metadata
+          emailRedirectTo: undefined, // you can set your deep link here
+        },
+      });
+
+      if (error) {
+        if (error.message.includes('User already registered')) {
+          Alert.alert('Account already exists for this email.');
+        } else {
+          Alert.alert('Sign up failed', error.message);
+        }
+        return;
+      }
+
+      // Optional: also insert into your "user" table if you have one
+      // Note: The table is often called "profiles" in Supabase quickstarts.
+      // const { error: insertErr } = await supabase.from('user').insert({
+      //   id: data.user.id,
+      //   name,
+      //   email,
+      // });
+      // if (insertErr) {
+      //   console.log('Insert profile error:', insertErr.message);
+      // }
+
+      Alert.alert(
+        'Check your inbox',
+        'We sent you a confirmation email. Please verify and then log in.'
+      );
+      setIsRegistering(false);
+    } catch (e) {
+      Alert.alert('Sign up failed', e.message);
+    } finally {
+      setBusy(false);
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-                <View style={styles.headerCenter}>
-                  <View style={styles.logo}>
-                    <Image
-                      source={require('./images/App_Logo.png')}
-                      style={styles.logoImage}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <Text style={styles.logoLabel}>SmartSpend</Text>
-                </View>
-      </View>
-      <Text style={styles.title}>{isRegistering ? 'Register' : 'Login'}</Text>
+  const handleLogin = async () => {
+    if (!validate()) return;
+    try {
+      setBusy(true);
 
-      {isRegistering && (
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        Alert.alert('Login failed', error.message);
+        return;
+      }
+      // success -> App.js listener will switch to HomeScreen
+    } catch (e) {
+      Alert.alert('Login failed', e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAction = () => {
+    if (isRegistering) return handleRegister();
+    return handleLogin();
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.select({ ios: 'padding', android: undefined })}
+    >
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerCenter}>
+            <View style={styles.logo}>
+              <Image
+                source={require('./images/App_Logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={styles.logoLabel}>SmartSpend</Text>
+          </View>
+        </View>
+
+        <Text style={styles.title}>{isRegistering ? 'Register' : 'Login'}</Text>
+
+        {isRegistering && (
+          <TextInput
+            style={styles.input}
+            placeholder="Name"
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="words"
+          />
+        )}
+
         <TextInput
           style={styles.input}
-          placeholder="Name"
-          value={name}
-          onChangeText={setName}
+          placeholder="Email"
+          value={email}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          onChangeText={setEmail}
         />
-      )}
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        autoCapitalize="none"
-        onChangeText={setEmail}
-      />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+        <TouchableOpacity
+          style={[styles.button, busy && { opacity: 0.6 }]}
+          onPress={handleAction}
+          disabled={busy}
+        >
+          <Text style={styles.buttonText}>
+            {busy ? 'Please wait…' : isRegistering ? 'Register' : 'Login'}
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.button} onPress={handleAction}>
-        <Text style={styles.buttonText}>
-          {isRegistering ? 'Register' : 'Login'}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        onPress={() => setIsRegistering(!isRegistering)}
-        style={styles.switchLink}
-      >
-        <Text style={styles.switchText}>
-          {isRegistering
-            ? 'Already have an account? Login'
-            : "Don't have an account? Register"}
-        </Text>
-      </TouchableOpacity>
-    </View>
+        <TouchableOpacity
+          onPress={() => setIsRegistering(!isRegistering)}
+          style={styles.switchLink}
+          disabled={busy}
+        >
+          <Text style={styles.switchText}>
+            {isRegistering
+              ? 'Already have an account? Login'
+              : "Don't have an account? Register"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -133,9 +229,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     fontFamily: 'Roboto',
-    marginBottom: 20,
+    marginBottom: 30,
     color: '#111827',
-    marginBottom: 30
   },
   input: {
     height: 50,

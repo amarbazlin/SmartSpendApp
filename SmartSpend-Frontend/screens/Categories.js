@@ -704,10 +704,19 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   const toggleMoreMenu = () => setIsMoreMenuOpen((p) => !p);
   const closeMoreMenu = () => setIsMoreMenuOpen(false);
 
-  const handleLogoutClick = useCallback(() => {
-    closeMoreMenu();
-    onLogout?.();
-  }, [onLogout]);
+ const handleLogoutClick = async () => {
+  closeMoreMenu();
+
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.error('Logout error:', error.message);
+    return;
+  }
+
+  if (onLogout) {
+    onLogout();
+  }
+};
 
   /* ---------------- UI small components ---------------- */
 

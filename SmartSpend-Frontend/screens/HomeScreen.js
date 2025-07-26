@@ -310,12 +310,20 @@ export default function HomeScreen({ onLogout }) {
     setIsMoreMenuOpen(false);
   };
 
-  const handleLogout = () => {
-    closeMoreMenu();
-    if (onLogout) {
-      onLogout();
-    }
-  };
+  const handleLogout = async () => {
+  closeMoreMenu();
+
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.error('Logout error:', error.message);
+    return;
+  }
+
+  if (onLogout) {
+    onLogout();
+  }
+};
+
 
   // Feature handlers
   const handleChatbot = () => {

@@ -837,10 +837,20 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const toggleMoreMenu = () => setIsMoreMenuOpen(!isMoreMenuOpen);
   const closeMoreMenu = () => setIsMoreMenuOpen(false);
 
-  const handleLogout = () => {
-    closeMoreMenu();
-    if (onLogout) onLogout();
-  };
+  const handleLogout = async () => {
+  closeMoreMenu();
+
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.error('Logout error:', error.message);
+    return;
+  }
+
+  if (onLogout) {
+    onLogout();
+  }
+};
+
 
   const getCategoryIcon = (categoryName) => {
     const name = categoryName || 'Other';
