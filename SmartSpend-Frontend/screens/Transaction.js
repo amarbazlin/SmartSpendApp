@@ -355,8 +355,8 @@ const TransactionForm = ({
 
   const getSaveButtonStyle = () => {
     return selectedTab === 'income'
-      ? [styles.saveButton, styles.incomeSaveButton]
-      : [styles.saveButton, styles.expenseSaveButton];
+      ? [styles.continueButton, styles.incomeSaveButton]
+      : [styles.continueButton, styles.expenseSaveButton];
   };
 
   const getCategoryEmoji = (categoryName) => {
@@ -618,12 +618,10 @@ const TransactionForm = ({
         </ScrollView>
 
         <View style={styles.buttonContainer}>
-          <TouchableOpacity style={getSaveButtonStyle()} onPress={handleSave}>
-            <Text style={styles.buttonText}>Save</Text>
-          </TouchableOpacity>
+        
 
           <TouchableOpacity
-            style={styles.continueButton}
+            style={getSaveButtonStyle()}
             onPress={handleContinue}
           >
             <Text style={styles.continueButtonText}>Continue</Text>
@@ -723,9 +721,8 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 25,
     alignItems: 'center',
-    backgroundColor: 'white',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    
   },
   continueButtonText: { color: '#1F2937', fontSize: 16, fontWeight: '600' },
   modalOverlay: {
