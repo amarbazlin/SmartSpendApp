@@ -549,10 +549,10 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
       supabase.removeChannel(channel);
     };
   }, [userId]);
+const fetchCategories = useCallback(async (uidParam = null) => {
+  setLoading(true);
 
-  const fetchCategories = useCallback(async (uidParam = null) => {
-    setLoading(true);
-
+  try {
     const {
       data: { user },
       error: userError,
@@ -565,39 +565,48 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
       return;
     }
 
+    // Get all categories for user
     const { data: allCategories, error: catError } = await supabase
       .from('categories')
       .select('*')
       .or(`user_id.is.null,user_id.eq.${uid}`)
       .order('id', { ascending: false });
 
-    if (catError) {
-      Alert.alert('Error fetching categories', catError.message);
-      setLoading(false);
-      return;
-    }
+    if (catError) throw catError;
 
-    const { data: expenses } = await supabase
+    // Fetch this month's expenses grouped by category
+    const firstDay = new Date();
+    firstDay.setDate(1);
+    const firstDayStr = firstDay.toISOString().split('T')[0];
+
+    const { data: expenses, error: expError } = await supabase
       .from('expenses')
-      .select('category, amount')
-      .eq('user_id', uid);
+      .select('amount, category_id, date')
+      .eq('user_id', uid)
+      .gte('date', firstDayStr);
 
+    if (expError) throw expError;
+
+    // Build map of category_id -> spent amount
     const spentMap = {};
-    if (expenses) {
-      expenses.forEach((exp) => {
-        spentMap[exp.category] = (spentMap[exp.category] || 0) + exp.amount;
-      });
-    }
+    expenses?.forEach(exp => {
+      spentMap[exp.category_id] = (spentMap[exp.category_id] || 0) + Number(exp.amount || 0);
+    });
 
-    const enriched = allCategories.map((cat) => ({
+    const enriched = allCategories.map(cat => ({
       ...cat,
-      spent: spentMap[cat.name] || 0,
+      spent: spentMap[cat.id] || 0,
       limit: cat.limit_ || 0,
     }));
 
     setCategories(enriched);
+  } catch (e) {
+    Alert.alert('Error fetching categories', e.message || 'Unknown error');
+  } finally {
     setLoading(false);
-  }, []);
+  }
+}, []);
+
 
   const filteredCategories = useMemo(
     () =>
