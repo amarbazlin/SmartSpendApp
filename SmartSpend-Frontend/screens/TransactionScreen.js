@@ -44,10 +44,6 @@ const ymdLocal = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /* ------------------------------ Local Parser ------------------------------ */
-/**
- * Robust Sri Lankan bank SMS parser
- * Supports COMBANK, HNB, SAMPATH, BOC, PB, NDB, SEYLAN, DFCC, NTB, PABC, UBL (and similar formats)
- */
 const parseBankSMS = (sms) => {
   if (!sms || typeof sms !== 'string') return null;
 
@@ -60,15 +56,10 @@ const parseBankSMS = (sms) => {
 
   // -------- amount detection --------
   const amountMatchers = [
-    // HNB style: Amount(Approx.):130.00 LKR
     /Amount\(Approx\.?\)\s*:\s*([\d,]+(?:\.\d+)?)\s*(?:LKR|Rs\.?|රු\.?)?/i,
-    // Amount: 1,234.56 LKR
     /Amount\s*:\s*([\d,]+(?:\.\d+)?)\s*(?:LKR|Rs\.?|රු\.?)?/i,
-    // Rs 1,234.56 / Rs. 1,234.56 / රු. 1,234.56
     /(?:LKR|Rs\.?|රු\.?)\s*([\d,]+(?:\.\d+)?)/i,
-    // debited with 1,234.56
     /(debited|credited)\s*(?:with)?\s*(?:LKR|Rs\.?|රු\.?)?\s*([\d,]+(?:\.\d+)?)/i,
-    // (approx LKR 3,200.00)
     /\(approx(?:\.|imate)?\s*(?:LKR|Rs\.?)\s*([\d,]+(?:\.\d+)?)\)/i,
   ];
 
@@ -76,7 +67,7 @@ const parseBankSMS = (sms) => {
   for (const rx of amountMatchers) {
     const m = body.match(rx);
     if (m) {
-      rawAmount = m[2] || m[1]; // support regex with two groups
+      rawAmount = m[2] || m[1];
       if (rawAmount) break;
     }
   }
@@ -142,7 +133,7 @@ const parseBankSMS = (sms) => {
     else if (/atm|cash wd|withdraw/i.test(body)) category = 'ATM Withdrawal';
     else if (/bill|utility|payment/i.test(body)) category = 'Bills';
     else if (/cash advance/i.test(body)) category = 'Cash Advance';
-    else category = 'Other'; // make sure frontend shows Other
+    else category = 'Other';
   }
 
   // -------- merchant / location --------
@@ -165,7 +156,7 @@ const parseBankSMS = (sms) => {
 
 const tabs = ['Daily', 'Monthly', 'Summary'];
 
-// More Menu Component (replacing the side menu)
+/* ----------------------------- More Menu modal ---------------------------- */
 const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -178,7 +169,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
       try {
         setLoading(true);
 
-        // 1) get auth user
         const {
           data: { user },
           error: userErr,
@@ -193,7 +183,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
 
         setEmail(user.email ?? '');
 
-        // Prefer auth metadata if you stored it there
         const metaName =
           user.user_metadata?.full_name ||
           user.user_metadata?.name ||
@@ -205,34 +194,24 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
           return;
         }
 
-        // 2) try users table by id
-        const { data: profileById, error: errById } = await supabase
+        const { data: profileById } = await supabase
           .from('users')
           .select('name, email')
           .eq('id', user.id)
           .maybeSingle();
-
-        if (errById) {
-          console.log('profileById error =>', errById);
-        }
 
         if (profileById?.name) {
           setName(profileById.name);
           return;
         }
 
-        // 3) fallback: try by email (in case your users.id != auth uid)
-        const { data: profileByEmail, error: errByEmail } = await supabase
+        const { data: profileByEmail } = await supabase
           .from('users')
           .select('name')
           .eq('email', user.email)
           .maybeSingle();
 
-        if (errByEmail) {
-          console.log('profileByEmail error =>', errByEmail);
-        }
-
-        setName(profileByEmail?.name || ''); // leave empty if not found
+        setName(profileByEmail?.name || '');
       } catch (e) {
         console.warn('Error loading profile', e);
       } finally {
@@ -284,7 +263,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Menu Items */}
             <View style={styles.menuItems}>
               <TouchableOpacity style={styles.menuItem}>
                 <Lock size={20} color="#6B7280" style={styles.menuIcon} />
@@ -426,6 +404,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     setShowTransactionForm(true);
   };
 
+  /** INSERT: called ONLY by the parent now */
   const handleTransactionAdded = useCallback(async (t) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
@@ -453,7 +432,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         if (!catErr && catRow?.id) {
           catId = catRow.id;
         } else {
-          // fallback try to find "Other"
           const { data: otherRow } = await supabase
             .from('categories')
             .select('id')
@@ -466,19 +444,20 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       const localDate = t.date || ymdLocal(new Date());
 
       if (t.type === 'income') {
+        // IMPORTANT: Do NOT send description if your table doesn't have it
         const { error } = await supabase.from('income').insert([{
           user_id: user.id,
           source: t.category || 'Other',
           amount: amt,
           date: localDate,
           note: t.note || null,
-          description: t.description || null,
+          // description removed – add back only if you added the column
         }]);
         if (error) throw error;
       } else {
         const { error } = await supabase.from('expenses').insert([{
           user_id: user.id,
-          category_id: catId, // may be null, view will give category null -> we fallback to "Other" in UI
+          category_id: catId,
           amount: amt,
           payment_method: t.account || 'Cash',
           note: t.note || (t.merchant ? `Location: ${t.merchant}` : null),
@@ -499,6 +478,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     }
   }, [fetchTransactions, safeAlert]);
 
+  /** UPDATE */
   const handleTransactionUpdated = useCallback(async (payload) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
@@ -511,6 +491,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         t_source: payload.category ?? null,
         t_payment_method: payload.account ?? null,
         t_note: payload.note ?? null,
+        // add t_description if your RPC supports it
       });
       if (error) throw error;
 
@@ -529,7 +510,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const fetchCategories = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('categories').select('*');
-    if (error) throw error;
+      if (error) throw error;
       setCategories(data || []);
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -541,7 +522,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       const { data: { user } } = await supabase.auth.getUser();
 
       const { data, error } = await supabase
-        .from('transactions') // DB view MUST expose `date`
+        .from('transactions') // view
         .select('*')
         .eq('user_id', user.id)
         .order('date', { ascending: false });
@@ -564,7 +545,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     }
   }, [safeAlert]);
 
-  /** Calculate month totals using the LOCAL date field */
   const calculateMonthTotals = useCallback((transactionData) => {
     const monthTx = transactionData.filter(t => {
       const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
@@ -634,7 +614,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     return { incomeDay, expenseDay };
   }, [transactions]);
 
-  /* ----- Current month filtered transactions (for Daily tab) + Group by day ---- */
   const currentMonthTransactions = useMemo(() => {
     return transactions.filter(t => {
       const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
@@ -642,7 +621,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     });
   }, [transactions, monthStart, nextMonthStart]);
 
-  // 👉 STRICTLY use t.date to group (no UTC problems)
   const dailySections = useMemo(() => {
     const map = new Map();
     currentMonthTransactions.forEach(t => {
@@ -652,7 +630,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     });
 
     const sections = Array.from(map.entries())
-      .sort(([a], [b]) => (a > b ? -1 : 1)) // desc by date string
+      .sort(([a], [b]) => (a > b ? -1 : 1))
       .map(([dateKey, items]) => {
         const [year, month, day] = dateKey.split('-');
         const d = new Date(Number(year), Number(month) - 1, Number(day));
@@ -679,7 +657,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
   const { incomeDay, expenseDay } = getDailyTotals(new Date());
 
-  /* --------------------------- Category Remaining -------------------------- */
   const getRemainingForCategory = useCallback((categoryName) => {
     const name = categoryName || 'Other';
     const cat = categories.find(c => c.name === name);
@@ -769,7 +746,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
                     amount: parsed.amount,
                     description: msg.body,
                     account: parsed.account,
-                    date: ymdLocal(new Date()), // you can parse the SMS date later
+                    date: ymdLocal(new Date()),
                   });
 
                   existingBodies.add(msg.body);
@@ -816,7 +793,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     setSmsText('');
   };
 
-  /* --------------------------------- Effects -------------------------------- */
   useEffect(() => {
     fetchTransactions();
     fetchCategories();
@@ -833,24 +809,20 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     }
   }, [selectedTab, transactions, currentYear, generateMonthlyData]);
 
-  /* ------------------------------- UI helpers ------------------------------- */
   const toggleMoreMenu = () => setIsMoreMenuOpen(!isMoreMenuOpen);
   const closeMoreMenu = () => setIsMoreMenuOpen(false);
 
   const handleLogout = async () => {
-  closeMoreMenu();
+    closeMoreMenu();
 
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    console.error('Logout error:', error.message);
-    return;
-  }
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Logout error:', error.message);
+      return;
+    }
 
-  if (onLogout) {
-    onLogout();
-  }
-};
-
+    if (onLogout) onLogout();
+  };
 
   const getCategoryIcon = (categoryName) => {
     const name = categoryName || 'Other';
@@ -991,7 +963,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     );
   };
 
-  /* ------------------------------- Main render ------------------------------ */
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#008080" />
@@ -1301,7 +1272,6 @@ const styles = StyleSheet.create({
   tabText: { color: '#D3D3D3', fontSize: 12, fontWeight: '500' },
   activeTabText: { color: 'white' },
 
-  /* --- SMS inline row --- */
   smsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1334,7 +1304,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
-  /* Summary inline row (Income | Expense | Total) */
   summaryInline: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1383,7 +1352,6 @@ const styles = StyleSheet.create({
 
   transactionsContainer: { flex: 1, backgroundColor: 'white', paddingHorizontal: 0 },
 
-  /* Day section header */
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1482,7 +1450,6 @@ const styles = StyleSheet.create({
   navItemInactive: { opacity: 0.7 },
   navText: { color: 'white', fontSize: 12, marginTop: 4 },
 
-  // More Menu
   moreModalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -1536,7 +1503,6 @@ const styles = StyleSheet.create({
   logoutItem: { marginTop: 32, backgroundColor: '#FEF2F2' },
   logoutText: { fontSize: 16, fontWeight: '500', color: '#EF4444' },
 
-  // Action Sheet
   actionsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
@@ -1554,7 +1520,6 @@ const styles = StyleSheet.create({
   actionEdit: { color: '#008080', fontSize: 16, fontWeight: '600' },
   actionDelete: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
 
-  // Details modal
   detailsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

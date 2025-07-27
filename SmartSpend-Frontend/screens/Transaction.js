@@ -1,3 +1,4 @@
+// Transaction.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -12,17 +13,15 @@ import {
 } from 'react-native';
 import {
   ChevronLeft,
-  Star,
   RefreshCw,
   Info,
   Camera,
   Edit3,
   X,
-  Search,
 } from 'lucide-react-native';
 import { supabase } from '../services/supabase';
 
-// Helper to get local date in yyyy-mm-dd
+// Local date yyyy-mm-dd
 const ymdLocal = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
@@ -39,7 +38,7 @@ const TransactionForm = ({
   onUpdate,
 }) => {
   const [selectedTab, setSelectedTab] = useState(transactionType);
-  const [date, setDate] = useState(
+  const [date] = useState(
     new Date().toLocaleDateString('en-US', {
       month: 'numeric',
       day: 'numeric',
@@ -47,44 +46,30 @@ const TransactionForm = ({
       weekday: 'short',
     })
   );
-  
-  const [pickedCategory, setPickedCategory] = useState(null);
+
   const [categories, setCategories] = useState({ income: [], expense: [] });
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
-  const [user, setUser] = useState(null);
+
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [account, setAccount] = useState('Cash');
   const [note, setNote] = useState('');
   const [description, setDescription] = useState('');
+
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
-  const [showAddCategory, setShowAddCategory] = useState(false);
-  const [showAddAccount, setShowAddAccount] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newAccountName, setNewAccountName] = useState('');
 
   const [accounts, setAccounts] = useState([
     { name: 'Cash', emoji: '💵' },
     { name: 'Transport', emoji: '🚌' },
-    { name: 'Bank Accounts', emoji: '🏦' },
+    { name: 'Bank', emoji: '🏦' },
     { name: 'Card', emoji: '💳' },
   ]);
 
   useEffect(() => {
     (async () => {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-      if (error || !user) {
-        console.error('No user session', error);
-        return;
-      }
-      setUser(user);
-
-      await loadCategoriesFromSupabase(user);
-      await loadAccountsFromSupabase(user);
+      await loadCategoriesFromSupabase();
+      await loadAccountsFromSupabase();
     })();
   }, []);
 
@@ -100,12 +85,8 @@ const TransactionForm = ({
       setDescription(editTransaction.description || '');
 
       const allCategories = [...categories.income, ...categories.expense];
-      const foundCategory = allCategories.find(
-        (cat) => cat.name === editTransaction.category
-      );
-      if (foundCategory) {
-        setSelectedCategoryId(foundCategory.id);
-      }
+      const found = allCategories.find((c) => c.name === editTransaction.category);
+      if (found) setSelectedCategoryId(found.id);
     }
   }, [mode, editTransaction, categories]);
 
@@ -115,10 +96,7 @@ const TransactionForm = ({
         data: { user },
         error: userErr,
       } = await supabase.auth.getUser();
-      if (userErr || !user) {
-        console.error('No user session', userErr);
-        return;
-      }
+      if (userErr || !user) return;
 
       const { data, error } = await supabase
         .from('categories')
@@ -129,36 +107,24 @@ const TransactionForm = ({
 
       const incomeCategories = data
         .filter((c) => c.type === 'income')
-        .map((c) => ({
-          id: c.id,
-          name: c.name,
-          emoji: c.icon || '📝',
-        }));
+        .map((c) => ({ id: c.id, name: c.name, emoji: c.icon || '📝' }));
 
       const expenseCategories = data
         .filter((c) => c.type === 'expense' || c.type == null)
-        .map((c) => ({
-          id: c.id,
-          name: c.name,
-          emoji: c.icon || '📝',
-        }));
+        .map((c) => ({ id: c.id, name: c.name, emoji: c.icon || '📝' }));
 
-      setCategories({
-        income: incomeCategories,
-        expense: expenseCategories,
-      });
+      setCategories({ income: incomeCategories, expense: expenseCategories });
     } catch (e) {
-      console.error('Error loading categories:', e);
+      console.error('loadCategoriesFromSupabase error:', e);
     }
   };
 
   const loadAccountsFromSupabase = async () => {
     try {
       const { data, error } = await supabase.from('accounts').select('*');
-
       if (error) throw error;
 
-      if (data && data.length > 0) {
+      if (data?.length) {
         setAccounts(
           data.map((acc) => ({
             name: acc.name,
@@ -166,21 +132,15 @@ const TransactionForm = ({
           }))
         );
       }
-    } catch (error) {
-      console.error('Error loading accounts:', error);
+    } catch (e) {
+      console.error('loadAccountsFromSupabase error:', e);
     }
   };
 
   const handleBackPress = () => {
     resetForm();
-
-    if (onClose && typeof onClose === 'function') {
-      onClose();
-    }
-
-    if (onBack && typeof onBack === 'function') {
-      onBack();
-    }
+    onClose?.();
+    onBack?.();
   };
 
   const resetForm = () => {
@@ -190,6 +150,7 @@ const TransactionForm = ({
     setNote('');
     setDescription('');
     setSelectedTab('expense');
+    setSelectedCategoryId(null);
   };
 
   const validateForm = () => {
@@ -197,142 +158,44 @@ const TransactionForm = ({
       Alert.alert('Error', 'Please enter an amount');
       return false;
     }
-
     if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
       return false;
     }
-
     if (!category || category.trim() === '') {
       Alert.alert('Error', 'Please select a category');
       return false;
     }
-
     if (!account || account.trim() === '') {
       Alert.alert('Error', 'Please select an account');
       return false;
     }
-
     return true;
   };
 
-  const handleSave = async () => {
+  // PURE submit – no DB writes here
+  const handleSubmit = () => {
     if (!validateForm()) return;
-    const todayLocal = ymdLocal(new Date());
 
-    try {
-      if (mode === 'edit') {
-        onUpdate?.({
-          amount: parseFloat(amount),
-          category: category,
-          category_id: selectedCategoryId,
-          account,
-          note,
-          description,
-        });
-      } else {
-        onTransactionComplete?.({
-          type: selectedTab,
-          date: todayLocal,
-          amount: parseFloat(amount),
-          category: category,
-          category_id: selectedCategoryId,
-          account,
-          note,
-          description,
-        });
-      }
+    const payload = {
+      type: selectedTab,
+      date: ymdLocal(new Date()),
+      amount: parseFloat(amount),
+      category,
+      category_id: selectedCategoryId,
+      account,
+      note,
+      description,
+    };
 
-      resetForm();
-      onClose();
-    } catch (e) {
-      console.error(e);
-      Alert.alert('Error', e.message || 'Failed to save transaction');
+    if (mode === 'edit') {
+      onUpdate?.(payload);
+    } else {
+      onTransactionComplete?.(payload);
     }
-  };
 
-  const handleContinue = async () => {
-    if (!validateForm()) return;
-    const todayLocal = ymdLocal(new Date());
-
-    try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-      if (userErr || !user) {
-        Alert.alert('Error', 'User session expired.');
-        return;
-      }
-
-      const amt = parseFloat(amount);
-
-      if (selectedTab === 'income') {
-        const { error } = await supabase.from('income').insert([
-          {
-            user_id: user.id,
-            source: category || 'Other',
-            amount: amt,
-            date: todayLocal,
-            note: note || null,
-          },
-        ]);
-
-        if (error) throw error;
-
-        onTransactionComplete?.({
-          type: 'income',
-          date: todayLocal,
-          amount: amt,
-          category,
-          category_id: null,
-          account,
-          note,
-          description,
-        });
-      } else {
-        if (!selectedCategoryId) {
-          Alert.alert('Error', 'Please pick a category');
-          return;
-        }
-
-        const { error } = await supabase.from('expenses').insert([
-          {
-            user_id: user.id,
-            category_id: selectedCategoryId,
-            amount: amt,
-            payment_method: account || 'Cash',
-            note: note || '',
-            description: description || null,
-            date: todayLocal,
-          },
-        ]);
-
-        if (error) throw error;
-
-        onTransactionComplete?.({
-          type: 'expense',
-          date: todayLocal,
-          amount: amt,
-          category,
-          category_id: selectedCategoryId,
-          account,
-          note,
-          description,
-        });
-      }
-
-      Alert.alert('Saved', 'Transaction added. Add another one.');
-
-      setAmount('');
-      setNote('');
-      setDescription('');
-      setCategory('');
-      setSelectedCategoryId(null);
-    } catch (e) {
-      console.error('Continue error:', e);
-      Alert.alert('Error', e.message || 'Failed to save transaction.');
-    }
+    resetForm();
+    onClose?.();
   };
 
   const getTabStyle = (tabType) => {
@@ -360,27 +223,27 @@ const TransactionForm = ({
   };
 
   const getCategoryEmoji = (categoryName) => {
-    const allCategories = [...categories.income, ...categories.expense];
-    const category = allCategories.find((cat) => cat.name === categoryName);
-    return category ? category.emoji : '📝';
+    const all = [...categories.income, ...categories.expense];
+    const cat = all.find((c) => c.name === categoryName);
+    return cat ? cat.emoji : '📝';
   };
 
   const getAccountEmoji = (accountName) => {
-    const account = accounts.find((acc) => acc.name === accountName);
-    return account ? account.emoji : '💳';
+    const acc = accounts.find((a) => a.name === accountName);
+    return acc ? acc.emoji : '💳';
   };
 
   const renderCategoryPicker = () => (
     <Modal
       visible={showCategoryPicker}
-      transparent={true}
+      transparent
       animationType="slide"
       onRequestClose={() => setShowCategoryPicker(false)}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Category</Text>
+          <Text style={styles.modalTitle}>Category</Text>
             <View style={styles.modalHeaderButtons}>
               <TouchableOpacity style={styles.modalHeaderButton}>
                 <Edit3 size={20} color="#9CA3AF" />
@@ -396,8 +259,8 @@ const TransactionForm = ({
 
           <ScrollView style={styles.pickerScrollView}>
             <View style={styles.pickerGrid}>
-              {categories[selectedTab].map((cat, index) => (
-                <View key={index} style={styles.pickerGridItem}>
+              {categories[selectedTab].map((cat) => (
+                <View key={cat.id} style={styles.pickerGridItem}>
                   <TouchableOpacity
                     style={styles.pickerItemButton}
                     onPress={() => {
@@ -411,19 +274,6 @@ const TransactionForm = ({
                   </TouchableOpacity>
                 </View>
               ))}
-
-              <View style={styles.pickerGridItem}>
-                <TouchableOpacity
-                  style={styles.pickerItemButton}
-                  onPress={() => {
-                    setShowCategoryPicker(false);
-                    setShowAddCategory(true);
-                  }}
-                >
-                  <Text style={styles.pickerItemEmoji}>➕</Text>
-                  <Text style={styles.pickerItemText}>Add</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           </ScrollView>
         </View>
@@ -434,7 +284,7 @@ const TransactionForm = ({
   const renderAccountPicker = () => (
     <Modal
       visible={showAccountPicker}
-      transparent={true}
+      transparent
       animationType="slide"
       onRequestClose={() => setShowAccountPicker(false)}
     >
@@ -457,8 +307,8 @@ const TransactionForm = ({
 
           <ScrollView style={styles.pickerScrollView}>
             <View style={styles.pickerGrid}>
-              {accounts.map((acc, index) => (
-                <View key={index} style={styles.pickerGridItem}>
+              {accounts.map((acc) => (
+                <View key={acc.name} style={styles.pickerGridItem}>
                   <TouchableOpacity
                     style={styles.pickerItemButton}
                     onPress={() => {
@@ -471,19 +321,6 @@ const TransactionForm = ({
                   </TouchableOpacity>
                 </View>
               ))}
-
-              <View style={styles.pickerGridItem}>
-                <TouchableOpacity
-                  style={styles.pickerItemButton}
-                  onPress={() => {
-                    setShowAccountPicker(false);
-                    setShowAddAccount(true);
-                  }}
-                >
-                  <Text style={styles.pickerItemEmoji}>➕</Text>
-                  <Text style={styles.pickerItemText}>Add</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           </ScrollView>
         </View>
@@ -510,6 +347,7 @@ const TransactionForm = ({
               onPress={() => {
                 setSelectedTab('income');
                 setCategory('');
+                setSelectedCategoryId(null);
               }}
             >
               <Text style={getTabTextStyle('income')}>Income</Text>
@@ -520,6 +358,7 @@ const TransactionForm = ({
               onPress={() => {
                 setSelectedTab('expense');
                 setCategory('');
+                setSelectedCategoryId(null);
               }}
             >
               <Text style={getTabTextStyle('expense')}>Expense</Text>
@@ -618,12 +457,7 @@ const TransactionForm = ({
         </ScrollView>
 
         <View style={styles.buttonContainer}>
-        
-
-          <TouchableOpacity
-            style={getSaveButtonStyle()}
-            onPress={handleContinue}
-          >
+          <TouchableOpacity style={getSaveButtonStyle()} onPress={handleSubmit}>
             <Text style={styles.continueButtonText}>Save</Text>
           </TouchableOpacity>
         </View>
@@ -701,28 +535,17 @@ const styles = StyleSheet.create({
   descriptionInput: { minHeight: 40, textAlignVertical: 'top' },
   cameraButton: { padding: 4, marginLeft: 8 },
   buttonContainer: {
-    flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 20,
-    gap: 12,
     backgroundColor: 'white',
   },
-  saveButton: {
-    flex: 2,
+  continueButton: {
     paddingVertical: 16,
     borderRadius: 25,
     alignItems: 'center',
   },
   incomeSaveButton: { backgroundColor: '#008080' },
   expenseSaveButton: { backgroundColor: '#EF4444' },
-  buttonText: { color: 'white', fontSize: 16, fontWeight: '600' },
-  continueButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 25,
-    alignItems: 'center',
-    
-  },
   continueButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   modalOverlay: {
     flex: 1,
@@ -746,6 +569,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937' },
   modalHeaderButtons: { flexDirection: 'row', gap: 16 },
   modalHeaderButton: { padding: 4 },
+  pickerScrollView: { flex: 1 },
   pickerGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
