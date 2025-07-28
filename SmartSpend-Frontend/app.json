@@ -35,12 +35,7 @@
         }
       ]
     ],
-    "extra": {
-      "eas": {
-        "projectId": "b8768969-09cf-4501-91c9-572682b186bd"
-      }
-    },
-    "owner": "amarbazlin",
+    "owner": "bazlinamar",
     "ios": {
       "bundleIdentifier": "y",
       "infoPlist": {
@@ -48,7 +43,12 @@
       }
     },
     "android": {
-      "package": "com.amarbazlin.SmartSpendApp"
+      "package": "com.bazlinamar.SmartSpend"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "40310d29-8912-447a-af70-10603a438da7"
+      }
     }
   }
 }
