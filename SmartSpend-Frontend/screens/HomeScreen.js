@@ -324,6 +324,90 @@ export default function HomeScreen({ onLogout }) {
   }
 };
 
+const handleTransactionAdded = async (t) => {
+  try {
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      alert("User session error");
+      return;
+    }
+
+    const amt = Number(t.amount);
+    const localDate = t.date || new Date().toISOString().split('T')[0];
+
+    let catId = t.category_id ?? null;
+
+    if (!catId && t.category) {
+      const { data: catRow } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('name', t.category)
+        .maybeSingle();
+      catId = catRow?.id || null;
+    }
+
+    if (t.type === 'income') {
+      const { error } = await supabase.from('income').insert([
+        {
+          user_id: user.id,
+          source: t.category || 'Other',
+          amount: amt,
+          date: localDate,
+          note: t.note || null,
+        },
+      ]);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('expenses').insert([
+        {
+          user_id: user.id,
+          category_id: catId,
+          amount: amt,
+          payment_method: t.account || 'Cash',
+          note: t.note || (t.merchant ? `Location: ${t.merchant}` : null),
+          description: t.description || null,
+          date: localDate,
+        },
+      ]);
+      if (error) throw error;
+    }
+
+    alert("Transaction added!");
+    fetchBalanceData();
+
+    // ✅ Close form and go to Home
+    setCurrentScreen('home');
+  } catch (error) {
+    console.error("Transaction Add Error:", error.message);
+    alert("Failed to add transaction.");
+  }
+};
+
+const handleTransactionUpdated = async (payload) => {
+  try {
+    const { error } = await supabase.rpc("update_transaction", {
+      t_type: payload.type,
+      t_id: payload.id,
+      t_amount: Number(payload.amount),
+      t_category_id: payload.category_id ?? null,
+      t_source: payload.category ?? null,
+      t_payment_method: payload.account ?? null,
+      t_note: payload.note ?? null,
+    });
+
+    if (error) throw error;
+    alert("Transaction updated!");
+    fetchBalanceData();
+  } catch (e) {
+    console.error("Update Error:", e.message);
+    alert("Update failed.");
+  }
+};
+
+
 
   // Feature handlers
   const handleChatbot = () => {
@@ -370,9 +454,10 @@ if (currentScreen === 'charts') {
   if (currentScreen === 'transaction') {
     return (
       <Transaction
-        onBack={navigateToHome} 
-        transactionType={transactionType}
-        onTransactionComplete={navigateToHome}
+         onBack={navigateToHome}
+          transactionType={transactionType}
+          onTransactionComplete={handleTransactionAdded}
+          onUpdate={handleTransactionUpdated}
       />
     );
   }
