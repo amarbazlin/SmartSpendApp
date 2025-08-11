@@ -24,7 +24,6 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
-  
 } from 'react-native';
 import {
   Home,
@@ -38,6 +37,7 @@ import {
   LogOut,
   MoreHorizontal,
 } from 'lucide-react-native';
+import { fetchRecommendation } from './fetchRecommendation';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -65,7 +65,6 @@ const Icon = ({ name, size = 24, color = '#000' }) => {
 /* ------------------------------------------------------------------ */
 /* --------------------------- MORE MENU ---------------------------- */
 /* ------------------------------------------------------------------ */
-// More Menu Component (replacing the side menu)
 const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -78,7 +77,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
       try {
         setLoading(true);
 
-        // 1) get auth user
         const {
           data: { user },
           error: userErr,
@@ -93,7 +91,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
 
         setEmail(user.email ?? '');
 
-        // Prefer auth metadata if you stored it there
         const metaName =
           user.user_metadata?.full_name ||
           user.user_metadata?.name ||
@@ -105,7 +102,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
           return;
         }
 
-        // 2) try users table by id
         const { data: profileById, error: errById } = await supabase
           .from('users')
           .select('name, email')
@@ -121,7 +117,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
           return;
         }
 
-        // 3) fallback: try by email (in case your users.id != auth uid)
         const { data: profileByEmail, error: errByEmail } = await supabase
           .from('users')
           .select('name')
@@ -132,7 +127,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
           console.log('profileByEmail error =>', errByEmail);
         }
 
-        setName(profileByEmail?.name || ''); // leave empty if not found
+        setName(profileByEmail?.name || '');
       } catch (e) {
         console.warn('Error loading profile', e);
       } finally {
@@ -184,7 +179,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Menu Items */}
             <View style={styles.menuItems}>
               <TouchableOpacity style={styles.menuItem}>
                 <Lock size={20} color="#6B7280" style={styles.menuIcon} />
@@ -247,11 +241,9 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   );
 };
 
-
 /* ------------------------------------------------------------------ */
 /* ---------------------- CATEGORY FORM MODAL ----------------------- */
 /* ------------------------------------------------------------------ */
-
 const CategoryFormModal = memo(function CategoryFormModal({
   visible,
   onClose,
@@ -473,11 +465,14 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [recommendation, setRecommendation] = useState(null);
+  const [userIncome, setUserIncome] = useState(0); // 🔥 ADDED: Store user income
+  const [isLoadingRecommendation, setIsLoadingRecommendation] = useState(false); // 🔥 ADDED: Missing state
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   const [showFormModal, setShowFormModal] = useState(false);
-  const [formInitialData, setFormInitialData] = useState(null); // null = add, object = edit
+  const [formInitialData, setFormInitialData] = useState(null);
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingCategory, setDeletingCategory] = useState(null);
@@ -516,6 +511,7 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
       }
       setUserId(user.id);
       await fetchCategories(user.id);
+      await fetchUserIncome(user.id); // 🔥 ADDED: Fetch user income
     })();
   }, []);
 
@@ -529,7 +525,7 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
         {
           event: 'INSERT',
           schema: 'public',
-        table: 'expenses',
+          table: 'expenses',
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
@@ -549,64 +545,101 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
       supabase.removeChannel(channel);
     };
   }, [userId]);
-const fetchCategories = useCallback(async (uidParam = null) => {
-  setLoading(true);
 
-  try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+  // 🔥 ADDED: Fetch user income
+  const fetchUserIncome = useCallback(async (uid) => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('users')
+        .select('monthly_income')
+        .eq('id', uid)
+        .maybeSingle();
 
-    const uid = uidParam || user?.id;
-    if (userError || !uid) {
-      Alert.alert('Error', 'Unable to fetch user session');
-      setLoading(false);
-      return;
+      if (error) {
+        console.error('Error fetching user income:', error);
+        return;
+      }
+
+      setUserIncome(profile?.monthly_income || 0);
+    } catch (error) {
+      console.error('Error fetching user income:', error);
     }
+  }, []);
 
-    // Get all categories for user
-    const { data: allCategories, error: catError } = await supabase
-      .from('categories')
-      .select('*')
-      .or(`user_id.is.null,user_id.eq.${uid}`)
-      .order('id', { ascending: false });
-
-    if (catError) throw catError;
-
-    // Fetch this month's expenses grouped by category
-    const firstDay = new Date();
-    firstDay.setDate(1);
-    const firstDayStr = firstDay.toISOString().split('T')[0];
-
-    const { data: expenses, error: expError } = await supabase
-      .from('expenses')
-      .select('amount, category_id, date')
-      .eq('user_id', uid)
-      .gte('date', firstDayStr);
-
-    if (expError) throw expError;
-
-    // Build map of category_id -> spent amount
-    const spentMap = {};
-    expenses?.forEach(exp => {
-      spentMap[exp.category_id] = (spentMap[exp.category_id] || 0) + Number(exp.amount || 0);
-    });
-
-    const enriched = allCategories.map(cat => ({
-      ...cat,
-      spent: spentMap[cat.id] || 0,
-      limit: cat.limit_ || 0,
-    }));
-
-    setCategories(enriched);
-  } catch (e) {
-    Alert.alert('Error fetching categories', e.message || 'Unknown error');
+  // 🔥 FIXED: AI Budget Handler
+const handleGetAIBudget = async () => {
+  try {
+    setIsLoadingRecommendation(true);
+    const rec = await fetchRecommendation(); // will update Supabase limits too
+    if (rec) {
+      setRecommendation(rec);
+      await fetchCategories(); // refresh cards with new limits
+      Alert.alert('Done', 'AI limits applied to your categories.');
+    }
   } finally {
-    setLoading(false);
+    setIsLoadingRecommendation(false);
   }
-}, []);
+};
 
+
+  const fetchCategories = useCallback(async (uidParam = null) => {
+    setLoading(true);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      const uid = uidParam || user?.id;
+      if (userError || !uid) {
+        Alert.alert('Error', 'Unable to fetch user session');
+        setLoading(false);
+        return;
+      }
+
+      // Get only expense categories for user
+      const { data: allCategories, error: catError } = await supabase
+        .from('categories')
+        .select('*')
+        .or(`user_id.is.null,user_id.eq.${uid}`)
+        .eq('type', 'expense')
+        .order('id', { ascending: false });
+
+      if (catError) throw catError;
+
+      // Fetch this month's expenses grouped by category
+      const firstDay = new Date();
+      firstDay.setDate(1);
+      const firstDayStr = firstDay.toISOString().split('T')[0];
+
+      const { data: expenses, error: expError } = await supabase
+        .from('expenses')
+        .select('amount, category_id, date')
+        .eq('user_id', uid)
+        .gte('date', firstDayStr);
+
+      if (expError) throw expError;
+
+      // Build map of category_id -> spent amount
+      const spentMap = {};
+      expenses?.forEach(exp => {
+        spentMap[exp.category_id] = (spentMap[exp.category_id] || 0) + Number(exp.amount || 0);
+      });
+
+      const enriched = allCategories.map(cat => ({
+        ...cat,
+        spent: spentMap[cat.id] || 0,
+        limit: cat.limit_ || 0,
+      }));
+
+      setCategories(enriched);
+    } catch (e) {
+      Alert.alert('Error fetching categories', e.message || 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const filteredCategories = useMemo(
     () =>
@@ -624,6 +657,64 @@ const fetchCategories = useCallback(async (uidParam = null) => {
       }, 0),
     [categories]
   );
+
+
+
+
+  const testYourAiService = async () => {
+  const yourAiUrl = 'http://10.3.1.6:5050';
+  
+  console.log('🔍 Testing your AI service specifically...');
+  
+  try {
+    // Test basic connection
+    console.log(`🔍 Testing basic connection to ${yourAiUrl}`);
+    const basicTest = await fetch(yourAiUrl, {
+      method: 'GET',
+      timeout: 5000,
+    });
+    
+    console.log(`✅ Basic connection successful - Status: ${basicTest.status}`);
+    
+    // Test recommend endpoint
+    console.log(`🔍 Testing recommend endpoint...`);
+    const recommendTest = await fetch(`${yourAiUrl}/recommend`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        age: 30,
+        income: 100000,
+        gender: 'male',
+        employment: 'employed',
+        dependents: 0
+      }),
+      timeout: 10000,
+    });
+    
+    console.log(`📊 Recommend response status: ${recommendTest.status}`);
+    
+    if (recommendTest.ok) {
+      const data = await recommendTest.json();
+      console.log(`🎉 SUCCESS! AI service is working:`, data);
+      return { success: true, url: yourAiUrl, data };
+    } else {
+      const errorText = await recommendTest.text();
+      console.log(`❌ Recommend endpoint failed: ${errorText}`);
+      return { success: false, error: `Status ${recommendTest.status}: ${errorText}` };
+    }
+    
+  } catch (error) {
+    console.log(`❌ Connection to your AI service failed:`, error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+
+
+
+
 
   const handleAdd = useCallback(() => {
     setFormInitialData(null);
@@ -713,18 +804,136 @@ const fetchCategories = useCallback(async (uidParam = null) => {
   const toggleMoreMenu = () => setIsMoreMenuOpen((p) => !p);
   const closeMoreMenu = () => setIsMoreMenuOpen(false);
 
- const handleLogoutClick = async () => {
-  closeMoreMenu();
+  const handleLogoutClick = async () => {
+    closeMoreMenu();
 
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    console.error('Logout error:', error.message);
-    return;
-  }
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Logout error:', error.message);
+      return;
+    }
 
-  if (onLogout) {
-    onLogout();
-  }
+    if (onLogout) {
+      onLogout();
+    }
+  };
+
+ 
+  // 🔥 IMPROVED: Better recommendation display in JSX
+const RecommendationDisplay = () => {
+  if (!recommendation) return null;
+
+  console.log('🔥 Rendering recommendation display with data:', recommendation);
+
+  return (
+    <View style={{
+      marginTop: 20,
+      padding: 20,
+      backgroundColor: '#f0f9ff',
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: '#0891b2',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    }}>
+      <Text style={{
+        fontWeight: 'bold',
+        fontSize: 20,
+        color: '#0f172a',
+        marginBottom: 15,
+        textAlign: 'center'
+      }}>
+        🤖 AI Budget Recommendations
+      </Text>
+      
+      {userIncome > 0 && (
+        <Text style={{
+          fontSize: 16,
+          color: '#475569',
+          marginBottom: 15,
+          textAlign: 'center',
+          fontWeight: '500'
+        }}>
+          Based on Monthly Income: Rs. {userIncome.toLocaleString()}
+        </Text>
+      )}
+
+      <View style={{ gap: 8 }}>
+        {Object.entries(recommendation).map(([category, amount]) => {
+          const numAmount = Number(amount);
+          const percentage = userIncome > 0 ? ((numAmount / userIncome) * 100).toFixed(1) : 0;
+          
+          return (
+            <View key={category} style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingVertical: 12,
+              paddingHorizontal: 15,
+              backgroundColor: 'white',
+              borderRadius: 8,
+              borderLeftWidth: 4,
+              borderLeftColor: category.toLowerCase() === 'savings' ? '#16a34a' : '#0891b2',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.05,
+              shadowRadius: 2,
+              elevation: 1,
+            }}>
+              <Text style={{
+                fontSize: 16,
+                fontWeight: '600',
+                color: '#1e293b',
+                flex: 1,
+                textTransform: 'capitalize'
+              }}>
+                {category}
+              </Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{
+                  fontSize: 18,
+                  fontWeight: 'bold',
+                  color: category.toLowerCase() === 'savings' ? '#16a34a' : '#0f172a'
+                }}>
+                  Rs. {numAmount.toLocaleString()}
+                </Text>
+                {userIncome > 0 && (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#64748b',
+                    fontWeight: '500'
+                  }}>
+                    ({percentage}% of income)
+                  </Text>
+                )}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      <View style={{
+        marginTop: 20,
+        padding: 15,
+        backgroundColor: '#dcfce7',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#16a34a'
+      }}>
+        <Text style={{
+          fontSize: 14,
+          color: '#15803d',
+          textAlign: 'center',
+          fontWeight: '600'
+        }}>
+          ✅ Budget limits have been updated for your expense categories
+        </Text>
+      </View>
+    </View>
+  );
 };
 
   /* ---------------- UI small components ---------------- */
@@ -762,53 +971,86 @@ const fetchCategories = useCallback(async (uidParam = null) => {
     </View>
   );
 
+  
+
+
   const CategoryCard = ({ category }) => {
-    const remaining = category.limit - category.spent;
-    const isOverBudget = remaining < 0;
-    return (
-      <View style={[styles.categoryCard, { backgroundColor: category.color }]}>
-        <View style={styles.categoryContent}>
-          <View style={styles.categoryIconContainer}>
-            <Text style={styles.categoryIcon}>{category.icon}</Text>
-          </View>
+  const remaining = category.limit - category.spent;
+  const isOverBudget = remaining < 0;
+  const [editedLimit, setEditedLimit] = useState(String(category.limit));
+  const [isSaving, setIsSaving] = useState(false);
 
-          <View style={styles.categoryInfo}>
-            <Text style={styles.categoryName}>{category.name}</Text>
-            <View style={styles.categoryActions}>
-              <TouchableOpacity
-                onPress={() => handleEdit(category)}
-                style={styles.actionButton}
-              >
-               
-                <Text style={styles.actionText}>Edit</Text>
-              </TouchableOpacity>
-              <Text style={styles.separator}>|</Text>
-              <TouchableOpacity
-                onPress={() => handleDelete(category)}
-                style={styles.actionButton}
-              >
-              
-                <Text style={styles.actionText}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+  const saveLimit = async () => {
+    const newLimit = parseFloat(editedLimit);
+    if (isNaN(newLimit)) return;
 
-          <View style={styles.categoryStats}>
+    setIsSaving(true);
+    const { error } = await supabase
+      .from('categories')
+      .update({ limit_: newLimit })
+      .eq('id', category.id);
+
+    setIsSaving(false);
+    if (error) {
+      Alert.alert('Failed to update limit');
+    } else {
+      await fetchCategories();
+    }
+  };
+
+  return (
+    <View style={[styles.categoryCard, { backgroundColor: category.color }]}>
+      <View style={styles.categoryContent}>
+        <View style={styles.categoryIconContainer}>
+          <Text style={styles.categoryIcon}>{category.icon}</Text>
+        </View>
+
+        <View style={styles.categoryInfo}>
+          <Text style={styles.categoryName}>{category.name}</Text>
+          <View style={styles.categoryActions}>
+            <TouchableOpacity onPress={() => handleEdit(category)} style={styles.actionButton}>
+              <Text style={styles.actionText}>Edit</Text>
+            </TouchableOpacity>
+            <Text style={styles.separator}>|</Text>
+            <TouchableOpacity onPress={() => handleDelete(category)} style={styles.actionButton}>
+              <Text style={styles.actionText}>Remove</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.categoryStats}>
           <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Limit</Text>
-              <Text style={styles.statValue}>Rs.{category.limit.toFixed(2)}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Remaining</Text>
-              <Text style={[styles.statValue, isOverBudget && styles.overBudget]}>
-                Rs{remaining.toFixed(2)}
-              </Text>
-            </View>
+            <Text style={styles.statLabel}>Limit</Text>
+            <TextInput
+              value={editedLimit}
+              onChangeText={setEditedLimit}
+              onBlur={saveLimit}
+              editable={!isSaving}
+              keyboardType="numeric"
+              style={{
+                borderWidth: 1,
+                borderColor: '#ccc',
+                borderRadius: 6,
+                paddingHorizontal: 6,
+                paddingVertical: 4,
+                fontWeight: '600',
+                minWidth: 80,
+                color: '#1F2937',
+                backgroundColor: '#fff',
+              }}
+            />
+          </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Remaining</Text>
+            <Text style={[styles.statValue, isOverBudget && styles.overBudget]}>
+              Rs.{remaining.toFixed(2)}
+            </Text>
           </View>
         </View>
       </View>
-    );
-  };
+    </View>
+  );
+};
 
   if (loading) return <LoadingSpinner />;
 
@@ -827,6 +1069,52 @@ const fetchCategories = useCallback(async (uidParam = null) => {
           <Text style={styles.summaryLabel}>Remaining (Monthly)</Text>
           <Text style={styles.summaryAmount}>Rs.{totalRemaining.toFixed(2)}</Text>
         </View>
+<View style={{ padding: 20 }}>
+  <TouchableOpacity
+    onPress={handleGetAIBudget}
+    style={{
+      padding: 15,
+      backgroundColor: isLoadingRecommendation ? '#94a3b8' : '#0891b2',
+      borderRadius: 10,
+      alignItems: 'center',
+      marginBottom: 10
+    }}
+    disabled={isLoadingRecommendation}
+  >
+    {isLoadingRecommendation ? (
+      <ActivityIndicator color="#fff" />
+    ) : (
+      <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+        🤖 Get AI Budget
+      </Text>
+    )}
+  </TouchableOpacity>
+
+  {!!recommendation && (
+    <View style={{
+      marginTop: 10, padding: 14, backgroundColor: '#f0f9ff',
+      borderRadius: 12, borderWidth: 1, borderColor: '#0891b2'
+    }}>
+      <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>
+        AI–Suggested Monthly Budget (Rs.)
+      </Text>
+      {Object.entries(recommendation).map(([name, amt]) => {
+        const pct = userIncome ? ((Number(amt) / userIncome) * 100).toFixed(1) : null;
+        return (
+          <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', marginVertical: 4 }}>
+            <Text style={{ fontWeight: '600' }}>{name}</Text>
+            <Text>Rs. {Number(amt).toLocaleString()} {pct ? `(${pct}%)` : ''}</Text>
+          </View>
+        );
+      })}
+      <Text style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
+        You can still edit any limit in the category cards below.
+      </Text>
+    </View>
+  )}
+</View>
+  
+
 
         <View style={styles.categoriesContainer}>
           {filteredCategories.map((category) => (
@@ -1348,3 +1636,5 @@ const styles = StyleSheet.create({
 });
 
 export default CategoryManager;
+
+

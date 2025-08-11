@@ -979,16 +979,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         </View>
       </View>
 
-      {/* Year Navigator */}
-      <View style={styles.dateContainer}>
-        <TouchableOpacity onPress={() => setCurrentYear(currentYear - 1)}>
-          <Ionicons name="chevron-back" size={20} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.dateText}>{currentYear}</Text>
-        <TouchableOpacity onPress={() => setCurrentYear(currentYear + 1)}>
-          <Ionicons name="chevron-forward" size={20} color="white" />
-        </TouchableOpacity>
-      </View>
+      
 
       {/* Tabs */}
       <View style={styles.tabContainer}>
@@ -1013,12 +1004,17 @@ export default function TransactionsScreen({ onBack, onLogout }) {
           </Text>
         </View>
       )}
+      <View style={styles.smsInfo}>
+        <Text style={styles.smsLabel}>
+          Paste you bank transaction SMS below to import transactions
+          </Text>
+      </View>
 
       {/* SMS INPUT + BUTTON (INLINE) */}
       <View style={styles.smsRow}>
         <TextInput
           style={styles.smsInputInline}
-          placeholder="Paste Bank SMS here"
+          placeholder="Paste SMS here"
           value={smsText}
           onChangeText={setSmsText}
           multiline={false}
@@ -1271,7 +1267,15 @@ const styles = StyleSheet.create({
   activeTab: { borderBottomWidth: 2, borderBottomColor: 'white' },
   tabText: { color: '#D3D3D3', fontSize: 12, fontWeight: '500' },
   activeTabText: { color: 'white' },
-
+  smsInfo:{
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 20,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FFFFFF',
+  },
   smsRow: {
     flexDirection: 'row',
     alignItems: 'center',
