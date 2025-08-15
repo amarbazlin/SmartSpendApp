@@ -8,8 +8,9 @@ COLUMNS = [
     "Entertainment","Savings","Healthcare","Education","Emergency"
 ]
 
-CRITICAL = {"Food","Transport","Housing","Utilities","Healthcare","Education","Emergency"}
-FLEX     = {"Entertainment","Savings"}  # we cap these first
+ESSENTIALS = ["Food","Housing","Healthcare","Utilities","Transport"]
+CRITICAL   = {"Food","Transport","Housing","Utilities","Healthcare","Education","Emergency"}
+FLEX       = {"Entertainment","Savings"}  # trimmed first
 
 def pct(x, income):
     if income <= 0: return 0.0
@@ -22,11 +23,6 @@ def pct(x, income):
 
 def rupees(p, income):
     return round(max(0.0, p) * income, 2)
-
-def clamp(v, lo=None, hi=None):
-    if lo is not None and v < lo: v = lo
-    if hi is not None and v > hi: v = hi
-    return v
 
 def age_band(age):
     a = int(round(float(age)))
@@ -51,155 +47,146 @@ def floors_caps(age):
     }
 
     # Caps (as % of income)
-    # Savings a bit higher for young, tighter after 30
     SAV_CAP = 0.25 if band=="young" else 0.20
     CAPS = {
         "Savings":       SAV_CAP,
         "Entertainment": 0.12,
-        "Housing":       0.35,   # avoid oversized housing in training data
+        "Housing":       0.35,
     }
     return FLOORS, CAPS
 
-def rebalance_row(row):
-    # parse
+def rebalance_row(row, target_sav=0.17, min_target=0.15, max_target=0.20):
+    changed = False
+
     age    = float(row["Age"])
     income = float(row["Income"])
     if income <= 0:
-        return row  # nothing to do, keep as-is
+        return row, changed  # nothing to do
 
     cats = {k: float(row[k]) for k in COLUMNS if k not in ("Age","Income")}
-    # If any NaN, coerce to 0
+    # coerce bad values to 0
     for k in list(cats.keys()):
         v = cats[k]
         cats[k] = v if isfinite(v) and v>=0 else 0.0
 
-    # If total already equals income (± small tolerance), still apply light caps/floors to fix extremes
     FLOORS, CAPS = floors_caps(age)
 
-    # 1) compute percentages
-    cur_total = sum(cats.values())
-    if cur_total <= 0:
-        # build a minimal baseline from floors then scale by income
-        base = {}
-        for k in cats:
-            base[k] = FLOORS.get(k, 0.0)
-        # normalize to <= 1.0 (if floors exceed 1, scale down uniformly)
-        s = sum(base.values())
-        if s > 1.0:
-            for k in base:
-                base[k] /= s
-        for k in base:
-            cats[k] = rupees(base[k], income)
-        return {**row, **{k: f"{cats[k]:.2f}" for k in cats}}
-
-    # Convert to pct
+    # Convert to pct of income
     pr = {k: pct(cats[k], income) for k in cats}
-
-    # 2) First, if sum(pr) far from 1, normalize lightly to keep shape
     s = sum(pr.values())
     if s > 0:
-        for k in pr: pr[k] = pr[k] / s
+        for k in pr: pr[k] = pr[k] / s  # light normalization
 
-    # 3) Apply floors
+    # --- NEW: Force Savings into target band (default 17%, clamped 15–20%) ---
+    forced_target = max(min_target, min(max_target, float(target_sav)))
+    before_sav = pr.get("Savings", 0.0)
+    pr["Savings"] = min(forced_target, CAPS["Savings"])  # respect age-based cap
+    if abs(pr["Savings"] - before_sav) > 1e-9:
+        changed = True
+    # -----------------------------------------------------------------------
+
+    # Apply floors for critical
     for k, fl in FLOORS.items():
-        pr[k] = max(pr.get(k, 0.0), fl)
+        if pr.get(k, 0.0) < fl:
+            pr[k] = fl
+            changed = True
 
-    # 4) Apply caps
+    # Apply caps
     for k, cap in CAPS.items():
-        pr[k] = min(pr.get(k, 0.0), cap)
+        if pr.get(k, 0.0) > cap:
+            pr[k] = cap
+            changed = True
 
-    # 5) Ensure total = 1.0 adjusting FLEX first then CRITICAL proportionally
-    #    If sum > 1 -> trim (Savings/Entertainment first), else top-up (Critical first)
-    s = sum(pr.values())
+    # Balance to 1.0 (trim FLEX first, then top-up CRITICAL)
+    def total():
+        return sum(pr.values())
 
-    def trim_amount(amount, groups):
-        """Trim 'amount' from these groups proportionally to their current share."""
-        if amount <= 0: return 0.0
-        mass = sum(pr[g] for g in groups if g in pr and pr[g] > 0)
-        if mass <= 0: return amount
+    def trim_from(groups, amount):
+        if amount <= 0: return
+        pool = sum(pr.get(g,0) for g in groups)
+        if pool <= 0: return
         for g in groups:
-            if pr.get(g, 0) <= 0: continue
-            take = amount * (pr[g] / mass)
-            pr[g] = max(0.0, pr[g] - take)
-        return 0.0
+            share = pr.get(g,0)/pool if pool>0 else 0
+            pr[g] = max(0.0, pr.get(g,0) - amount*share)
 
-    def topup_amount(amount, groups):
-        """Add 'amount' to these groups proportionally to their current share (or evenly if all 0)."""
-        if amount <= 0: return 0.0
-        mass = sum(pr.get(g, 0) for g in groups)
-        if mass <= 0:
+    def add_to(groups, amount):
+        if amount <= 0: return
+        pool = sum(pr.get(g,0) for g in groups)
+        if pool <= 0:
             # even split
             each = amount / max(1, len(groups))
             for g in groups:
-                pr[g] = pr.get(g,0)+each
-            return 0.0
+                pr[g] = pr.get(g,0) + each
+            return
         for g in groups:
-            share = pr.get(g, 0) / mass if mass>0 else 1.0/len(groups)
-            pr[g] = pr.get(g,0) + amount * share
-        return 0.0
+            share = pr.get(g,0)/pool
+            pr[g] = pr.get(g,0) + amount*share
 
+    s = total()
     if s > 1.0:
-        over = s - 1.0
-        # trim Savings + Entertainment first
-        over = trim_amount(over, FLEX)
-        s = sum(pr.values())
+        trim_from(FLEX, s-1.0)
+        s = total()
         if s > 1.0:
-            # still over? trim non-housing critical proportionally (keep floors)
-            crits = [c for c in CRITICAL if c in pr]
-            over = s - 1.0
-            mass = sum(max(0.0, pr[c] - floors_caps(age)[0].get(c,0.0)) for c in crits)
-            if mass > 0:
-                for c in crits:
-                    free = max(0.0, pr[c] - FLOORS.get(c,0.0))
-                    take = over * (free / mass)
-                    pr[c] = max(FLOORS.get(c,0.0), pr[c] - take)
+            # trim critical above floors
+            over = s-1.0
+            free_pool = sum(max(0.0, pr[c]-FLOORS.get(c,0.0)) for c in CRITICAL)
+            if free_pool > 0:
+                for c in CRITICAL:
+                    free = max(0.0, pr[c]-FLOORS.get(c,0.0))
+                    take = over * (free/free_pool)
+                    pr[c] = max(FLOORS.get(c,0.0), pr[c]-take)
     elif s < 1.0:
-        need = 1.0 - s
-        # top up critical first (esp. Food/Housing/Healthcare/Utilities)
-        pri_crit = ["Food","Housing","Healthcare","Utilities","Transport","Education","Emergency"]
-        topup_amount(need, [c for c in pri_crit if c in pr])
+        # Top-up essentials first
+        add_to(ESSENTIALS, 1.0 - s)
 
-    # 6) Re-check caps (just in case top-up broke them)
+    # Re-check caps after top-up
     for k, cap in CAPS.items():
-        if pr[k] > cap:
-            diff = pr[k] - cap
+        if pr.get(k,0.0) > cap:
+            spill = pr[k] - cap
             pr[k] = cap
-            # spill the excess to critical
-            topup_amount(diff, [c for c in CRITICAL if c in pr])
+            add_to(ESSENTIALS, spill)
 
-    # Tiny float drift normalize
-    s = sum(pr.values())
+    # Final normalize (tiny drift)
+    s = total()
     if s > 0:
-        for k in pr:
-            pr[k] /= s
+        for k in pr: pr[k] /= s
 
-    # 7) back to rupees
+    # Back to rupees
     for k in cats:
         cats[k] = rupees(pr.get(k, 0.0), income)
 
     out = {**row}
     for k in cats:
-        out[k] = f"{cats[k]:.2f}"
-    return out
+        # keep 2dp strings like your file
+        new_val = f"{cats[k]:.2f}"
+        if new_val != row[k]:
+            changed = True
+        out[k] = new_val
+    return out, changed
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in",  dest="incsv",  required=True, help="Input CSV path")
-    ap.add_argument("--out", dest="outcsv", required=True, help="Output CSV path")
+    ap.add_argument("--input",  dest="incsv",  required=True, help="Input CSV path")
+    ap.add_argument("--output", dest="outcsv", required=True, help="Output CSV path")
+    ap.add_argument("--target-savings", type=float, default=0.17,
+                    help="Target savings rate (0.15–0.20 recommended). Default 0.17")
     args = ap.parse_args()
 
     rows = []
     with open(args.incsv, "r", encoding="utf-8-sig") as f:
         rdr = csv.DictReader(f)
-        # Validate columns
+        # Strict header check
         if [c.strip() for c in rdr.fieldnames] != COLUMNS:
             raise SystemExit(f"CSV header must be exactly:\n{', '.join(COLUMNS)}")
         for r in rdr:
             rows.append(r)
 
     out_rows = []
+    changed_count = 0
     for r in rows:
-        out_rows.append(rebalance_row(r))
+        out, changed = rebalance_row(r, target_sav=args.target_savings)
+        out_rows.append(out)
+        if changed: changed_count += 1
 
     with open(args.outcsv, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)
@@ -208,6 +195,7 @@ def main():
             w.writerow(r)
 
     print(f"✅ Wrote balanced dataset -> {args.outcsv}")
+    print(f"   Rows changed: {changed_count}/{len(rows)}")
 
 if __name__ == "__main__":
     main()

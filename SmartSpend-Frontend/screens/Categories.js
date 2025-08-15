@@ -11,7 +11,6 @@ import {
 } from 'lucide-react-native';
 import { fetchRecommendation, getBudgetingIncome } from './fetchRecommendation';
 
-
 const { width: screenWidth } = Dimensions.get('window');
 
 /* -------------------- Helpers & Validation -------------------- */
@@ -406,10 +405,6 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   const [formInitialData, setFormInitialData] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingCategory, setDeletingCategory] = useState(null);
-  
-  
-
-
 
   const availableIcons = useMemo(
     () => ['🍜', '🚌', '📚', '🎬', '🛍️', '💪', '⚡', '💄', '🏠', '🎮', '☕', '🎵'],
@@ -459,22 +454,20 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
     };
   }, [userId]);
 
-const fetchUserIncome = useCallback(async (uidParam = null) => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    const uid = uidParam || user?.id;
-    if (!uid) return;
+  const fetchUserIncome = useCallback(async (uidParam = null) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const uid = uidParam || user?.id;
+      if (!uid) return;
 
-    // pulls base users.monthly_income + this month's rows from `income`
-    const { income } = await getBudgetingIncome(uid);
-    setUserIncome(Number(income) || 0);
-  } catch (e) {
-    console.log('fetchUserIncome error:', e?.message || e);
-    setUserIncome(0);
-  }
-}, []);
-
-
+      // pulls base users.monthly_income + this month's rows from `income`
+      const { income } = await getBudgetingIncome(uid);
+      setUserIncome(Number(income) || 0);
+    } catch (e) {
+      console.log('fetchUserIncome error:', e?.message || e);
+      setUserIncome(0);
+    }
+  }, []);
 
   const fetchCategories = useCallback(async (uidParam = null) => {
     setLoading(true);
@@ -581,14 +574,15 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
           return;
         }
 
+        // Over-income guard
         const currentLimit = formInitialData?.id
           ? Number(categories.find((c) => c.id === formInitialData.id)?.limit || 0)
-           : 0;
-           const newTotal = (Number(totals?.total) || 0) - currentLimit + parsedLimit;
-           if ((Number(userIncome) || 0) > 0 && newTotal > Number(userIncome)) {
-            Alert.alert('Over budget',`This change would exceed your income by Rs. ${money(newTotal - userIncome)}. Please lower a limit and try again.`);
-            return;
-          }
+          : 0;
+        const newTotal = (Number(totals?.total) || 0) - currentLimit + parsedLimit;
+        if ((Number(userIncome) || 0) > 0 && newTotal > Number(userIncome)) {
+          Alert.alert('Over budget', `This change would exceed your income by Rs. ${money(newTotal - userIncome)}. Please lower a limit and try again.`);
+          return;
+        }
 
         const categoryData = {
           name: form.name.trim(),
@@ -614,7 +608,7 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
         Alert.alert('Save Error', e.message || 'Failed to save category.');
       }
     },
-    [categories, formInitialData, fetchCategories]
+    [categories, formInitialData, fetchCategories, totals?.total, userIncome]
   );
 
   const confirmDelete = useCallback(async () => {
@@ -704,57 +698,68 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
     </View>
   );
 
-  // AI recommendation display (grouped)
+  // AI recommendation display (friendlier, visual, explained terms)
   const RecommendationDisplay = () => {
     if (!recommendation) return null;
 
+    // bucket by role
     const buckets = { critical: [], flex: [], buffer: [] };
     Object.entries(recommendation).forEach(([name, amt]) => {
       const role = guessRole(name);
       buckets[role]?.push([name, Number(amt) || 0]);
     });
 
-    const Section = ({ title, items }) => {
-      if (!items.length) return null;
+    const Row = ({ name, amt }) => {
+      const pct = userIncome ? Math.max(0, Math.min(100, (amt / userIncome) * 100)) : 0;
       return (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ fontWeight: '700', marginBottom: 6 }}>{title}</Text>
-          {items.map(([name, amt]) => {
-            const pct = userIncome ? ((amt / userIncome) * 100).toFixed(1) : null;
-            return (
-              <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', marginVertical: 4 }}>
-                <Text style={{ fontWeight: '600' }}>{name}</Text>
-                <Text>
-                  Rs. {money(amt)} {pct ? `(${pct}%)` : ''}
-                </Text>
-              </View>
-            );
-          })}
+        <View style={styles.recRow} key={name}>
+          <View style={styles.recRowTop}>
+            <Text style={styles.recName} numberOfLines={1}>{name}</Text>
+            <Text style={styles.recAmount}>Rs. {money(amt)} <Text style={styles.recPct}>({pct.toFixed(1)}%)</Text></Text>
+          </View>
+          <View style={styles.recBarTrack}>
+            <View style={[styles.recBarFill, { width: `${pct}%` }]} />
+          </View>
+        </View>
+      );
+    };
+
+    const Section = ({ title, hint, items }) => {
+      if (!items?.length) return null;
+      return (
+        <View style={{ marginTop: 12 }}>
+          <Text style={styles.recSectionTitle}>{title}</Text>
+          <Text style={styles.recSectionHint}>{hint}</Text>
+          {items.map(([n, a]) => <Row key={n} name={n} amt={a} />)}
         </View>
       );
     };
 
     return (
-      <View
-        style={{
-          marginTop: 20,
-          padding: 20,
-          backgroundColor: '#f0f9ff',
-          borderRadius: 12,
-          borderWidth: 2,
-          borderColor: '#0891b2',
-        }}
-      >
-        <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>
-          AI–Suggested Monthly Budget (Rs.)
+      <View style={styles.recCard}>
+        <Text style={styles.recHeader}>💡 Your Smart Budget Plan</Text>
+        <Text style={styles.recIntro}>
+          Based on your monthly income of Rs. {money(userIncome)}, here’s an easy plan for this month.
         </Text>
 
-        <Section title="Critical (Essentials)" items={buckets.critical} />
-        <Section title="Flex" items={buckets.flex} />
-        <Section title="Emergency" items={buckets.buffer} />
+        <Section
+          title="Essentials (Must‑haves)"
+          hint="Bills and basics you can’t skip — e.g., food, utilities, transport, healthcare."
+          items={buckets.critical}
+        />
+        <Section
+          title="Flexible Spending (Nice‑to‑haves)"
+          hint="Optional items you can adjust — e.g., entertainment, shopping, hobbies."
+          items={buckets.flex}
+        />
+        <Section
+          title="Emergency Fund (Buffer)"
+          hint="Money set aside for surprises or tough months."
+          items={buckets.buffer}
+        />
 
-        <Text style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          You can still edit any limit in the category cards below.
+        <Text style={styles.recFooterNote}>
+          You can edit any limit in the category cards below.
         </Text>
       </View>
     );
@@ -780,12 +785,14 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
         setError('Enter a valid amount');
         return;
       }
+
+      // Over-income guard for inline edits
       const currentLimit = Number(category.limit || 0);
       const newTotal = (Number(totals?.total) || 0) - currentLimit + newLimit;
       if ((Number(userIncome) || 0) > 0 && newTotal > Number(userIncome)) {
-      setError(`That would exceed your income by Rs. ${money(newTotal - userIncome)}.`);
-      return;
-    }
+        setError(`Over income by Rs. ${money(newTotal - userIncome)}. Please lower a limit.`);
+        return;
+      }
 
       setIsSaving(true);
       const { error: upErr } = await supabase.from('categories').update({ limit_: newLimit }).eq('id', category.id);
@@ -880,25 +887,23 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="none">
         <View style={{ padding: 20 }}>
+          {/* Friendlier AI Button + hint */}
           <TouchableOpacity
             onPress={handleGetAIBudget}
-            style={{
-              padding: 15,
-              backgroundColor: isLoadingRecommendation ? '#94a3b8' : '#0891b2',
-              borderRadius: 10,
-              alignItems: 'center',
-              marginBottom: 10,
-            }}
+            style={[styles.aiButton, isLoadingRecommendation && styles.aiButtonDisabled]}
             disabled={isLoadingRecommendation}
           >
             {isLoadingRecommendation ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>🤖 Get AI Budget</Text>
+              <Text style={styles.aiButtonText}>🤖 Generate Budget Plan</Text>
             )}
           </TouchableOpacity>
+          <Text style={styles.aiButtonHint}>
+            Creates a plan using your income and recent spending. You can change numbers anytime.
+          </Text>
 
-          {/* Grouped AI Summary */}
+          {/* Friendlier AI Summary */}
           <RecommendationDisplay />
         </View>
 
@@ -907,7 +912,7 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
           {grouped.crit.length > 0 && (
             <View style={{ marginBottom: 12 }}>
               <Text style={{ fontWeight: '700', marginBottom: 6 }}>
-                Critical (Essentials) — Rs. {money(grouped.totals.crit)}
+                Essentials (Must‑haves) — Rs. {money(grouped.totals.crit)}
               </Text>
               {grouped.crit.map((category) => (
                 <CategoryCard key={category.id} category={category} />
@@ -918,7 +923,7 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
           {grouped.flex.length > 0 && (
             <View style={{ marginBottom: 12 }}>
               <Text style={{ fontWeight: '700', marginBottom: 6 }}>
-                Discretionary / Flex — Rs. {money(grouped.totals.flex)}
+                Flexible Spending (Nice‑to‑haves) — Rs. {money(grouped.totals.flex)}
               </Text>
               {grouped.flex.map((category) => (
                 <CategoryCard key={category.id} category={category} />
@@ -929,7 +934,7 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
           {grouped.buffer.length > 0 && (
             <View style={{ marginBottom: 12 }}>
               <Text style={{ fontWeight: '700', marginBottom: 6 }}>
-                Emergency Buffer — Rs. {money(grouped.totals.buffer)}
+                Emergency Fund (Buffer) — Rs. {money(grouped.totals.buffer)}
               </Text>
               {grouped.buffer.map((category) => (
                 <CategoryCard key={category.id} category={category} />
@@ -989,11 +994,6 @@ const fetchUserIncome = useCallback(async (uidParam = null) => {
   );
 };
 
-
-
-
-
-
 /* ------------------------------------------------------------------ */
 /* ------------------------------- STYLES --------------------------- */
 /* ------------------------------------------------------------------ */
@@ -1022,7 +1022,6 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   headerTop: {
-    
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1032,7 +1031,6 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 8,
     borderRadius: 8,
-    
   },
   headerTitle: {
     fontSize: 20,
@@ -1064,19 +1062,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
   },
-  summaryContainer: {
-    marginVertical: 24,
-  },
-  summaryLabel: {
-    color: '#6B7280',
-    fontSize: 16,
-    marginBottom: 8,
-  },
-  summaryAmount: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
+
   categoriesContainer: {
     gap: 12,
   },
@@ -1150,6 +1136,99 @@ const styles = StyleSheet.create({
   overBudget: {
     color: '#DC2626',
   },
+
+  /* Friendlier AI button */
+  aiButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#0A8AB8',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiButtonDisabled: {
+    backgroundColor: '#94a3b8',
+  },
+  aiButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  aiButtonHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#64748B',
+  },
+
+  /* Friendlier AI budget styles */
+  recCard: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#E6F7FB',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#0891b2',
+  },
+  recHeader: {
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 6,
+    color: '#0F172A',
+  },
+  recIntro: {
+    fontSize: 14,
+    color: '#334155',
+    marginBottom: 8,
+  },
+  recSectionTitle: {
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  recSectionHint: {
+    color: '#475569',
+    fontSize: 12,
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  recRow: {
+    marginBottom: 10,
+  },
+  recRowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  recName: {
+    fontWeight: '600',
+    color: '#111827',
+    maxWidth: '55%',
+  },
+  recAmount: {
+    fontWeight: '600',
+    color: '#111827',
+  },
+  recPct: {
+    fontWeight: '400',
+    color: '#6B7280',
+  },
+  recBarTrack: {
+    height: 8,
+    width: '100%',
+    backgroundColor: '#E5E7EB',
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  recBarFill: {
+    height: 8,
+    backgroundColor: '#0891b2',
+    borderRadius: 999,
+  },
+  recFooterNote: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#6B7280',
+  },
+
   fab: {
     position: 'absolute',
     bottom: 100,
@@ -1446,6 +1525,3 @@ const styles = StyleSheet.create({
 });
 
 export default CategoryManager;
-
-
-

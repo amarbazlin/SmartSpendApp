@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "SmartSpendApp",
-    "slug": "SmartSpendApp",
+    "slug": "smartspend",
     "icon": "./screens/images/App_Logo_imresizer.png",
     "version": "1.0.0",
     "sdkVersion": "51.0.0",
@@ -47,8 +47,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "40310d29-8912-447a-af70-10603a438da7"
-      }
+        "projectId": "45cbf1a9-fad6-4779-963b-1592e4a1e630"
+      },
+      "apiUrl": "https://0da41aa167cb.ngrok-free.app"
     }
   }
 }
