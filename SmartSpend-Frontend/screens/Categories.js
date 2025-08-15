@@ -1,70 +1,89 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  memo,
-} from 'react';
+// screens/Categories.js
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { supabase } from '../services/supabase';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  Modal,
-  Image,
-  ActivityIndicator,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
-  Alert,
-  Dimensions,
-  KeyboardAvoidingView,
-  Platform,
-  TouchableWithoutFeedback,
-  Keyboard,
+  View, Text, ScrollView, TouchableOpacity, TextInput, Modal, Image,
+  ActivityIndicator, SafeAreaView, StatusBar, Alert, Dimensions,
+  KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, StyleSheet,
 } from 'react-native';
 import {
-  Home,
-  Wallet,
-  DollarSign,
-  Lock,
-  X,
-  Bell,
-  Palette,
-  Globe,
-  LogOut,
-  MoreHorizontal,
+  Home, Wallet, DollarSign, Lock, X, Bell, Palette, Globe, LogOut, MoreHorizontal,
 } from 'lucide-react-native';
-import { fetchRecommendation } from './fetchRecommendation';
+import { fetchRecommendation, getBudgetingIncome } from './fetchRecommendation';
+
 
 const { width: screenWidth } = Dimensions.get('window');
 
-/* ------------------------------------------------------------------ */
-/* --------------------------- UTIL ICON ---------------------------- */
-/* ------------------------------------------------------------------ */
-const Icon = ({ name, size = 24, color = '#000' }) => {
-  const iconMap = {
-    menu: '☰',
-    search: '🔍',
-    plus: '+',
-    close: '✕',
-    home: '🏠',
-    dollar: '$',
-    target: '🎯',
-    chart: '📊',
-  };
-  return (
-    <Text style={[{ fontSize: size, color }, styles.iconText]}>
-      {iconMap[name] || name}
-    </Text>
-  );
+/* -------------------- Helpers & Validation -------------------- */
+const MONEY_CAP = 1000000; // max budget limit
+const round2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
+const money = (v) =>
+  (Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const norm = (s = '') => s.trim().toLowerCase();
+
+const parseMoney = (v) => {
+  const n = Number(String(v).replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return 0;
+  if (n > MONEY_CAP) return MONEY_CAP;
+  return Math.round(n * 100) / 100;
 };
 
-/* ------------------------------------------------------------------ */
-/* --------------------------- MORE MENU ---------------------------- */
-/* ------------------------------------------------------------------ */
+const validateBudgetTotals = (categories, income) => {
+  const total = categories.reduce((s, c) => s + (Number(c.limit) || 0), 0);
+  const totalR = round2(total);
+  const incomeR = round2(Number(income) || 0);
+  return {
+    total: totalR,
+    leftover: round2(incomeR - totalR),
+    over: totalR > incomeR,
+  };
+};
+
+// role guesser (no DB column required)
+const guessRole = (name = '') => {
+  const n = name.toLowerCase();
+  if (n === 'buffer' || n === 'emergency' || n === 'rainy day') return 'buffer';
+  if (
+    ['rent', 'housing', 'utilities', 'food', 'transport', 'healthcare', 'medicine'].some((k) =>
+      n.includes(k)
+    )
+  ) {
+    return 'critical';
+  }
+  return 'flex';
+};
+
+// Make sure user has a Buffer category (no “role” column needed)
+async function ensureBufferExists(uid) {
+  const { data: existing } = await supabase
+    .from('categories')
+    .select('id,name')
+    .eq('user_id', uid)
+    .eq('type', 'expense');
+
+  const hasBuffer = (existing || []).some((c) => norm(c.name) === 'buffer');
+  if (!hasBuffer) {
+    await supabase.from('categories').insert([
+      {
+        user_id: uid,
+        name: 'Buffer',
+        icon: '🧰',
+        color: '#E0E7FF',
+        type: 'expense',
+        limit_: 0,
+      },
+    ]);
+  }
+}
+
+/* --------------------------- UI bits -------------------------- */
+const Icon = ({ name, size = 24, color = '#000' }) => {
+  const iconMap = { menu: '☰', search: '🔍', plus: '+', close: '✕', home: '🏠', dollar: '$', target: '🎯', chart: '📊' };
+  return <Text style={[{ fontSize: size, color }, styles.iconText]}>{iconMap[name] || name}</Text>;
+};
+
+/* --------------------------- More Menu ------------------------ */
 const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -72,86 +91,33 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-
-    const loadUser = async () => {
+    (async () => {
       try {
         setLoading(true);
-
         const {
           data: { user },
-          error: userErr,
+          error,
         } = await supabase.auth.getUser();
-
-        if (userErr) throw userErr;
-        if (!user) {
-          setName('');
-          setEmail('');
-          return;
-        }
+        if (error || !user) return;
 
         setEmail(user.email ?? '');
-
         const metaName =
-          user.user_metadata?.full_name ||
-          user.user_metadata?.name ||
-          user.user_metadata?.username ||
-          '';
-
-        if (metaName) {
-          setName(metaName);
-          return;
+          user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.username || '';
+        if (metaName) setName(metaName);
+        else {
+          const { data: profile } = await supabase.from('users').select('name').eq('id', user.id).maybeSingle();
+          setName(profile?.name || '');
         }
-
-        const { data: profileById, error: errById } = await supabase
-          .from('users')
-          .select('name, email')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (errById) {
-          console.log('profileById error =>', errById);
-        }
-
-        if (profileById?.name) {
-          setName(profileById.name);
-          return;
-        }
-
-        const { data: profileByEmail, error: errByEmail } = await supabase
-          .from('users')
-          .select('name')
-          .eq('email', user.email)
-          .maybeSingle();
-
-        if (errByEmail) {
-          console.log('profileByEmail error =>', errByEmail);
-        }
-
-        setName(profileByEmail?.name || '');
-      } catch (e) {
-        console.warn('Error loading profile', e);
       } finally {
         setLoading(false);
       }
-    };
-
-    loadUser();
+    })();
   }, [isOpen]);
 
   return (
-    <Modal
-      visible={isOpen}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
+    <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.moreModalOverlay}>
-        <TouchableOpacity 
-          style={styles.moreBackdrop} 
-          onPress={onClose}
-          activeOpacity={1}
-        />
-        
+        <TouchableOpacity style={styles.moreBackdrop} onPress={onClose} activeOpacity={1} />
         <View style={styles.moreMenu}>
           <ScrollView style={styles.moreMenuContent}>
             <View style={styles.moreMenuHeader}>
@@ -163,7 +129,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                     resizeMode="cover"
                   />
                 </View>
-
                 {loading ? (
                   <ActivityIndicator size="small" color="#6B7280" />
                 ) : (
@@ -173,7 +138,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                   </View>
                 )}
               </View>
-
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <X size={20} color="#6B7280" />
               </TouchableOpacity>
@@ -192,7 +156,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
                   <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
-                  <Text style={styles.menuItemSubtitle}>LKR(Rs.)</Text>
+                  <Text style={styles.menuItemSubtitle}>LKR (Rs.)</Text>
                 </View>
               </TouchableOpacity>
 
@@ -224,10 +188,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={[styles.menuItem, styles.logoutItem]}
-                onPress={onLogout}
-              >
+              <TouchableOpacity style={[styles.menuItem, styles.logoutItem]} onPress={onLogout}>
                 <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
                 <View style={styles.menuItemContent}>
                   <Text style={styles.logoutText}>Logout</Text>
@@ -241,9 +202,7 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
   );
 };
 
-/* ------------------------------------------------------------------ */
-/* ---------------------- CATEGORY FORM MODAL ----------------------- */
-/* ------------------------------------------------------------------ */
+/* ----------------------- Category Form Modal ------------------ */
 const CategoryFormModal = memo(function CategoryFormModal({
   visible,
   onClose,
@@ -251,59 +210,52 @@ const CategoryFormModal = memo(function CategoryFormModal({
   initialData,
   availableIcons,
   availableColors,
+  existingNames = [],
 }) {
-  const [localForm, setLocalForm] = useState({
-    name: '',
-    limit: '',
-    icon: '📦',
-    color: '#E8E8E8',
-  });
+  const [localForm, setLocalForm] = useState({ name: '', limit: '', icon: '📦', color: '#E8E8E8' });
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (visible) {
-      const { name = '', limit = '', icon = '📦', color = '#E8E8E8' } =
-        initialData || {};
-      setLocalForm({
-        name: name ?? '',
-        limit: limit !== undefined && limit !== null ? String(limit) : '',
-        icon,
-        color,
-      });
-    }
+    if (!visible) return;
+    const { name = '', limit = '', icon = '📦', color = '#E8E8E8' } = initialData || {};
+    setLocalForm({ name, limit: limit !== undefined && limit !== null ? String(limit) : '', icon, color });
+    setError('');
   }, [visible, initialData]);
 
-  const updateFormName = useCallback((text) => {
-    setLocalForm((p) => ({ ...p, name: text }));
-  }, []);
-
+  const updateFormName = useCallback((text) => setLocalForm((p) => ({ ...p, name: text })), []);
   const updateFormLimit = useCallback((text) => {
     const numericText = text.replace(/[^0-9.]/g, '');
     const parts = numericText.split('.');
-    const formattedText =
-      parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : numericText;
-    setLocalForm((p) => ({ ...p, limit: formattedText }));
+    const formatted = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : numericText;
+    setLocalForm((p) => ({ ...p, limit: formatted }));
   }, []);
-
-  const updateFormIcon = useCallback((icon) => {
-    setLocalForm((p) => ({ ...p, icon }));
-  }, []);
-
-  const updateFormColor = useCallback((color) => {
-    setLocalForm((p) => ({ ...p, color }));
-  }, []);
+  const updateFormIcon = useCallback((icon) => setLocalForm((p) => ({ ...p, icon })), []);
+  const updateFormColor = useCallback((color) => setLocalForm((p) => ({ ...p, color })), []);
 
   const handleSave = useCallback(() => {
-    onSave(localForm);
-  }, [localForm, onSave]);
+    setError('');
+    const name = localForm.name.trim();
+    if (!name) {
+      setError('Name is required');
+      return;
+    }
+    const duplicate = existingNames.some(
+      (n) => n !== norm(initialData?.name || '') && norm(n) === norm(name)
+    );
+    if (duplicate) {
+      setError('You already have a category with this name');
+      return;
+    }
+    const moneyVal = parseMoney(localForm.limit);
+    if (moneyVal === null) {
+      setError('Enter a valid amount');
+      return;
+    }
+    onSave({ ...localForm, name, limit: moneyVal });
+  }, [localForm, onSave, existingNames, initialData]);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      presentationStyle="overFullScreen"
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" presentationStyle="overFullScreen" onRequestClose={onClose}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
@@ -320,11 +272,7 @@ const CategoryFormModal = memo(function CategoryFormModal({
               </TouchableOpacity>
             </View>
 
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="none"
-              contentContainerStyle={{ paddingBottom: 16 }}
-            >
+            <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="none" contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={styles.form}>
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Category Name</Text>
@@ -355,6 +303,8 @@ const CategoryFormModal = memo(function CategoryFormModal({
                   />
                 </View>
 
+                {!!error && <Text style={{ color: '#DC2626' }}>{error}</Text>}
+
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Icon</Text>
                   <View style={styles.iconGrid}>
@@ -362,10 +312,7 @@ const CategoryFormModal = memo(function CategoryFormModal({
                       <TouchableOpacity
                         key={icon}
                         onPress={() => updateFormIcon(icon)}
-                        style={[
-                          styles.iconOption,
-                          localForm.icon === icon && styles.selectedIcon,
-                        ]}
+                        style={[styles.iconOption, localForm.icon === icon && styles.selectedIcon]}
                       >
                         <Text style={styles.iconOptionText}>{icon}</Text>
                       </TouchableOpacity>
@@ -391,10 +338,7 @@ const CategoryFormModal = memo(function CategoryFormModal({
                 </View>
 
                 <View style={styles.formButtons}>
-                  <TouchableOpacity
-                    onPress={onClose}
-                    style={styles.cancelButton}
-                  >
+                  <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={handleSave} style={styles.saveButton}>
@@ -412,18 +356,10 @@ const CategoryFormModal = memo(function CategoryFormModal({
   );
 });
 
-/* ------------------------------------------------------------------ */
-/* ------------------------ DELETE MODAL ---------------------------- */
-/* ------------------------------------------------------------------ */
+/* --------------------------- Delete Modal --------------------- */
 const DeleteModal = memo(function DeleteModal({ visible, onClose, onConfirm, categoryName }) {
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      presentationStyle="overFullScreen"
-    >
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} presentationStyle="overFullScreen">
       <View style={styles.modalOverlay}>
         <View style={[styles.modalContent, { maxHeight: undefined }]}>
           <View style={styles.modalHeader}>
@@ -432,15 +368,13 @@ const DeleteModal = memo(function DeleteModal({ visible, onClose, onConfirm, cat
               <Icon name="close" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
-
           <View style={styles.deleteConfirmation}>
             <View style={styles.deleteIcon}>
               <Icon name="trash" size={24} color="#DC2626" />
             </View>
             <Text style={styles.deleteTitle}>Delete Category</Text>
             <Text style={styles.deleteMessage}>
-              Are you sure you want to delete "{categoryName}"? This action cannot
-              be undone.
+              Are you sure you want to delete "{categoryName}"? This action cannot be undone.
             </Text>
             <View style={styles.deleteButtons}>
               <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
@@ -457,48 +391,36 @@ const DeleteModal = memo(function DeleteModal({ visible, onClose, onConfirm, cat
   );
 });
 
-/* ------------------------------------------------------------------ */
-/* ----------------------- CATEGORY MANAGER ------------------------- */
-/* ------------------------------------------------------------------ */
+/* -------------------------- Main Screen ----------------------- */
 const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   const [userId, setUserId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [recommendation, setRecommendation] = useState(null);
-  const [userIncome, setUserIncome] = useState(0); // 🔥 ADDED: Store user income
-  const [isLoadingRecommendation, setIsLoadingRecommendation] = useState(false); // 🔥 ADDED: Missing state
+  const [userIncome, setUserIncome] = useState(0);
+  const [isLoadingRecommendation, setIsLoadingRecommendation] = useState(false);
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-
   const [showFormModal, setShowFormModal] = useState(false);
   const [formInitialData, setFormInitialData] = useState(null);
-
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingCategory, setDeletingCategory] = useState(null);
+  
+  
+
+
 
   const availableIcons = useMemo(
     () => ['🍜', '🚌', '📚', '🎬', '🛍️', '💪', '⚡', '💄', '🏠', '🎮', '☕', '🎵'],
     []
   );
   const availableColors = useMemo(
-    () => [
-      '#E8E8E8',
-      '#A8C8EC',
-      '#F4E4A6',
-      '#F8BBD9',
-      '#C7D2FE',
-      '#A7F3D0',
-      '#FEF3C7',
-      '#FECACA',
-      '#D1FAE5',
-      '#DBEAFE',
-      '#E0E7FF',
-      '#FCE7F3',
-    ],
+    () => ['#E8E8E8', '#A8C8EC', '#F4E4A6', '#F8BBD9', '#C7D2FE', '#A7F3D0', '#FEF3C7', '#FECACA', '#D1FAE5', '#DBEAFE', '#E0E7FF', '#FCE7F3'],
     []
   );
 
+  /* Load user + data */
   useEffect(() => {
     (async () => {
       const {
@@ -510,105 +432,67 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
         return;
       }
       setUserId(user.id);
+      await ensureBufferExists(user.id);
       await fetchCategories(user.id);
-      await fetchUserIncome(user.id); // 🔥 ADDED: Fetch user income
+      await fetchUserIncome(user.id);
     })();
   }, []);
 
+  /* Real-time spend updates */
   useEffect(() => {
     if (!userId) return;
-
     const channel = supabase
       .channel('expenses-realtime')
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'expenses',
-          filter: `user_id=eq.${userId}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'expenses', filter: `user_id=eq.${userId}` },
         (payload) => {
           const { category, amount } = payload.new;
           setCategories((prev) =>
-            prev.map((c) =>
-              c.name === category
-                ? { ...c, spent: (c.spent || 0) + Number(amount) }
-                : c
-            )
+            prev.map((c) => (c.name === category ? { ...c, spent: (c.spent || 0) + Number(amount) } : c))
           );
         }
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
   }, [userId]);
 
-  // 🔥 ADDED: Fetch user income
-  const fetchUserIncome = useCallback(async (uid) => {
-    try {
-      const { data: profile, error } = await supabase
-        .from('users')
-        .select('monthly_income')
-        .eq('id', uid)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching user income:', error);
-        return;
-      }
-
-      setUserIncome(profile?.monthly_income || 0);
-    } catch (error) {
-      console.error('Error fetching user income:', error);
-    }
-  }, []);
-
-  // 🔥 FIXED: AI Budget Handler
-const handleGetAIBudget = async () => {
+const fetchUserIncome = useCallback(async (uidParam = null) => {
   try {
-    setIsLoadingRecommendation(true);
-    const rec = await fetchRecommendation(); // will update Supabase limits too
-    if (rec) {
-      setRecommendation(rec);
-      await fetchCategories(); // refresh cards with new limits
-      Alert.alert('Done', 'AI limits applied to your categories.');
-    }
-  } finally {
-    setIsLoadingRecommendation(false);
+    const { data: { user } } = await supabase.auth.getUser();
+    const uid = uidParam || user?.id;
+    if (!uid) return;
+
+    // pulls base users.monthly_income + this month's rows from `income`
+    const { income } = await getBudgetingIncome(uid);
+    setUserIncome(Number(income) || 0);
+  } catch (e) {
+    console.log('fetchUserIncome error:', e?.message || e);
+    setUserIncome(0);
   }
-};
+}, []);
+
 
 
   const fetchCategories = useCallback(async (uidParam = null) => {
     setLoading(true);
-
     try {
       const {
         data: { user },
-        error: userError,
       } = await supabase.auth.getUser();
-
       const uid = uidParam || user?.id;
-      if (userError || !uid) {
-        Alert.alert('Error', 'Unable to fetch user session');
-        setLoading(false);
-        return;
-      }
+      if (!uid) throw new Error('No session');
 
-      // Get only expense categories for user
       const { data: allCategories, error: catError } = await supabase
         .from('categories')
         .select('*')
-        .or(`user_id.is.null,user_id.eq.${uid}`)
+        .eq('user_id', uid)
         .eq('type', 'expense')
         .order('id', { ascending: false });
-
       if (catError) throw catError;
 
-      // Fetch this month's expenses grouped by category
       const firstDay = new Date();
       firstDay.setDate(1);
       const firstDayStr = firstDay.toISOString().split('T')[0];
@@ -618,19 +502,17 @@ const handleGetAIBudget = async () => {
         .select('amount, category_id, date')
         .eq('user_id', uid)
         .gte('date', firstDayStr);
-
       if (expError) throw expError;
 
-      // Build map of category_id -> spent amount
       const spentMap = {};
-      expenses?.forEach(exp => {
+      (expenses || []).forEach((exp) => {
         spentMap[exp.category_id] = (spentMap[exp.category_id] || 0) + Number(exp.amount || 0);
       });
 
-      const enriched = allCategories.map(cat => ({
+      const enriched = (allCategories || []).map((cat) => ({
         ...cat,
         spent: spentMap[cat.id] || 0,
-        limit: cat.limit_ || 0,
+        limit: Number(cat.limit_ || 0),
       }));
 
       setCategories(enriched);
@@ -641,94 +523,33 @@ const handleGetAIBudget = async () => {
     }
   }, []);
 
-  const filteredCategories = useMemo(
-    () =>
-      categories.filter((category) =>
-        category.name.toLowerCase().includes(searchTerm.toLowerCase())
-      ),
-    [categories, searchTerm]
-  );
-
-  const totalRemaining = useMemo(
-    () =>
-      categories.reduce((sum, category) => {
-        const remaining = category.limit - category.spent;
-        return sum + Math.max(remaining, 0);
-      }, 0),
-    [categories]
-  );
-
-
-
-
-  const testYourAiService = async () => {
-  const yourAiUrl = 'http://10.3.1.6:5050';
-  
-  console.log('🔍 Testing your AI service specifically...');
-  
-  try {
-    // Test basic connection
-    console.log(`🔍 Testing basic connection to ${yourAiUrl}`);
-    const basicTest = await fetch(yourAiUrl, {
-      method: 'GET',
-      timeout: 5000,
-    });
-    
-    console.log(`✅ Basic connection successful - Status: ${basicTest.status}`);
-    
-    // Test recommend endpoint
-    console.log(`🔍 Testing recommend endpoint...`);
-    const recommendTest = await fetch(`${yourAiUrl}/recommend`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        age: 30,
-        income: 100000,
-        gender: 'male',
-        employment: 'employed',
-        dependents: 0
-      }),
-      timeout: 10000,
-    });
-    
-    console.log(`📊 Recommend response status: ${recommendTest.status}`);
-    
-    if (recommendTest.ok) {
-      const data = await recommendTest.json();
-      console.log(`🎉 SUCCESS! AI service is working:`, data);
-      return { success: true, url: yourAiUrl, data };
-    } else {
-      const errorText = await recommendTest.text();
-      console.log(`❌ Recommend endpoint failed: ${errorText}`);
-      return { success: false, error: `Status ${recommendTest.status}: ${errorText}` };
+  /* AI Budget */
+  const handleGetAIBudget = async () => {
+    try {
+      setIsLoadingRecommendation(true);
+      const rec = await fetchRecommendation(); // updates Supabase limits too
+      if (rec) {
+        setRecommendation(rec);
+        await fetchCategories(); // refresh cards with new limits
+        Alert.alert('AI Budget Applied', 'Limits updated based on your current income.');
+      }
+    } finally {
+      setIsLoadingRecommendation(false);
     }
-    
-  } catch (error) {
-    console.log(`❌ Connection to your AI service failed:`, error.message);
-    return { success: false, error: error.message };
-  }
-};
+  };
 
+  /* Totals banner (rounded to avoid -0.01 drift) */
+  const totals = useMemo(() => validateBudgetTotals(categories, userIncome), [categories, userIncome]);
 
-
-
-
-
+  /* CRUD handlers */
   const handleAdd = useCallback(() => {
     setFormInitialData(null);
     setShowFormModal(true);
   }, []);
-
   const handleEdit = useCallback((category) => {
-    setFormInitialData({
-      ...category,
-      limit: category.limit,
-    });
+    setFormInitialData({ ...category, limit: category.limit });
     setShowFormModal(true);
   }, []);
-
   const handleDelete = useCallback((category) => {
     setDeletingCategory(category);
     setShowDeleteModal(true);
@@ -746,31 +567,43 @@ const handleGetAIBudget = async () => {
           return;
         }
 
-        const parsedLimit = parseFloat(form.limit);
-        if (isNaN(parsedLimit) || parsedLimit < 0) {
-          Alert.alert('Error', 'Please enter a valid positive number for limit.');
+        // client-side duplicate check (case-insensitive)
+        const lower = norm(form.name);
+        const exists = categories.some((c) => c.id !== formInitialData?.id && norm(c.name) === lower);
+        if (exists) {
+          Alert.alert('Duplicate', 'You already have a category with this name.');
           return;
         }
 
+        const parsedLimit = parseMoney(form.limit);
+        if (parsedLimit === null) {
+          Alert.alert('Error', 'Please enter a valid amount.');
+          return;
+        }
+
+        const currentLimit = formInitialData?.id
+          ? Number(categories.find((c) => c.id === formInitialData.id)?.limit || 0)
+           : 0;
+           const newTotal = (Number(totals?.total) || 0) - currentLimit + parsedLimit;
+           if ((Number(userIncome) || 0) > 0 && newTotal > Number(userIncome)) {
+            Alert.alert('Over budget',`This change would exceed your income by Rs. ${money(newTotal - userIncome)}. Please lower a limit and try again.`);
+            return;
+          }
+
         const categoryData = {
           name: form.name.trim(),
-          icon: form.icon,
+          icon: form.icon || '📦',
           limit_: parsedLimit,
-          color: form.color,
+          color: form.color || '#E8E8E8',
           user_id: user.id,
           type: 'expense',
         };
 
         if (formInitialData?.id) {
-          const { error: upErr } = await supabase
-            .from('categories')
-            .update(categoryData)
-            .eq('id', formInitialData.id);
+          const { error: upErr } = await supabase.from('categories').update(categoryData).eq('id', formInitialData.id);
           if (upErr) throw upErr;
         } else {
-          const { error: insErr } = await supabase
-            .from('categories')
-            .insert([categoryData]);
+          const { error: insErr } = await supabase.from('categories').insert([categoryData]);
           if (insErr) throw insErr;
         }
 
@@ -781,18 +614,13 @@ const handleGetAIBudget = async () => {
         Alert.alert('Save Error', e.message || 'Failed to save category.');
       }
     },
-    [fetchCategories, formInitialData]
+    [categories, formInitialData, fetchCategories]
   );
 
   const confirmDelete = useCallback(async () => {
     try {
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('id', deletingCategory.id);
-
+      const { error } = await supabase.from('categories').delete().eq('id', deletingCategory.id);
       if (error) throw error;
-
       await fetchCategories();
       setShowDeleteModal(false);
       setDeletingCategory(null);
@@ -806,138 +634,43 @@ const handleGetAIBudget = async () => {
 
   const handleLogoutClick = async () => {
     closeMoreMenu();
-
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('Logout error:', error.message);
       return;
     }
-
-    if (onLogout) {
-      onLogout();
-    }
+    if (onLogout) onLogout();
   };
 
- 
-  // 🔥 IMPROVED: Better recommendation display in JSX
-const RecommendationDisplay = () => {
-  if (!recommendation) return null;
-
-  console.log('🔥 Rendering recommendation display with data:', recommendation);
-
-  return (
-    <View style={{
-      marginTop: 20,
-      padding: 20,
-      backgroundColor: '#f0f9ff',
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: '#0891b2',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-    }}>
-      <Text style={{
-        fontWeight: 'bold',
-        fontSize: 20,
-        color: '#0f172a',
-        marginBottom: 15,
-        textAlign: 'center'
-      }}>
-        🤖 AI Budget Recommendations
-      </Text>
-      
-      {userIncome > 0 && (
-        <Text style={{
-          fontSize: 16,
-          color: '#475569',
-          marginBottom: 15,
-          textAlign: 'center',
-          fontWeight: '500'
-        }}>
-          Based on Monthly Income: Rs. {userIncome.toLocaleString()}
-        </Text>
-      )}
-
-      <View style={{ gap: 8 }}>
-        {Object.entries(recommendation).map(([category, amount]) => {
-          const numAmount = Number(amount);
-          const percentage = userIncome > 0 ? ((numAmount / userIncome) * 100).toFixed(1) : 0;
-          
-          return (
-            <View key={category} style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              paddingVertical: 12,
-              paddingHorizontal: 15,
-              backgroundColor: 'white',
-              borderRadius: 8,
-              borderLeftWidth: 4,
-              borderLeftColor: category.toLowerCase() === 'savings' ? '#16a34a' : '#0891b2',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 1 },
-              shadowOpacity: 0.05,
-              shadowRadius: 2,
-              elevation: 1,
-            }}>
-              <Text style={{
-                fontSize: 16,
-                fontWeight: '600',
-                color: '#1e293b',
-                flex: 1,
-                textTransform: 'capitalize'
-              }}>
-                {category}
-              </Text>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{
-                  fontSize: 18,
-                  fontWeight: 'bold',
-                  color: category.toLowerCase() === 'savings' ? '#16a34a' : '#0f172a'
-                }}>
-                  Rs. {numAmount.toLocaleString()}
-                </Text>
-                {userIncome > 0 && (
-                  <Text style={{
-                    fontSize: 12,
-                    color: '#64748b',
-                    fontWeight: '500'
-                  }}>
-                    ({percentage}% of income)
-                  </Text>
-                )}
-              </View>
-            </View>
-          );
-        })}
-      </View>
-
-      <View style={{
-        marginTop: 20,
-        padding: 15,
-        backgroundColor: '#dcfce7',
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#16a34a'
-      }}>
-        <Text style={{
-          fontSize: 14,
-          color: '#15803d',
-          textAlign: 'center',
-          fontWeight: '600'
-        }}>
-          ✅ Budget limits have been updated for your expense categories
-        </Text>
-      </View>
-    </View>
+  /* Filter + Group */
+  const filteredCategories = useMemo(
+    () => categories.filter((c) => c.name.toLowerCase().includes(searchTerm.toLowerCase())),
+    [categories, searchTerm]
   );
-};
 
-  /* ---------------- UI small components ---------------- */
+  const grouped = useMemo(() => {
+    const crit = [];
+    const flex = [];
+    const buffer = [];
+    (filteredCategories || []).forEach((c) => {
+      const role = guessRole(c.name);
+      if (role === 'buffer') buffer.push(c);
+      else if (role === 'critical') crit.push(c);
+      else flex.push(c);
+    });
+    return {
+      crit,
+      flex,
+      buffer,
+      totals: {
+        crit: crit.reduce((s, x) => s + Number(x.limit || 0), 0),
+        flex: flex.reduce((s, x) => s + Number(x.limit || 0), 0),
+        buffer: buffer.reduce((s, x) => s + Number(x.limit || 0), 0),
+      },
+    };
+  }, [filteredCategories]);
 
+  /* Small components */
   const LoadingSpinner = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color="#0D9488" />
@@ -971,86 +704,155 @@ const RecommendationDisplay = () => {
     </View>
   );
 
-  
+  // AI recommendation display (grouped)
+  const RecommendationDisplay = () => {
+    if (!recommendation) return null;
 
+    const buckets = { critical: [], flex: [], buffer: [] };
+    Object.entries(recommendation).forEach(([name, amt]) => {
+      const role = guessRole(name);
+      buckets[role]?.push([name, Number(amt) || 0]);
+    });
 
-  const CategoryCard = ({ category }) => {
-  const remaining = category.limit - category.spent;
-  const isOverBudget = remaining < 0;
-  const [editedLimit, setEditedLimit] = useState(String(category.limit));
-  const [isSaving, setIsSaving] = useState(false);
+    const Section = ({ title, items }) => {
+      if (!items.length) return null;
+      return (
+        <View style={{ marginTop: 10 }}>
+          <Text style={{ fontWeight: '700', marginBottom: 6 }}>{title}</Text>
+          {items.map(([name, amt]) => {
+            const pct = userIncome ? ((amt / userIncome) * 100).toFixed(1) : null;
+            return (
+              <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', marginVertical: 4 }}>
+                <Text style={{ fontWeight: '600' }}>{name}</Text>
+                <Text>
+                  Rs. {money(amt)} {pct ? `(${pct}%)` : ''}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      );
+    };
 
-  const saveLimit = async () => {
-    const newLimit = parseFloat(editedLimit);
-    if (isNaN(newLimit)) return;
+    return (
+      <View
+        style={{
+          marginTop: 20,
+          padding: 20,
+          backgroundColor: '#f0f9ff',
+          borderRadius: 12,
+          borderWidth: 2,
+          borderColor: '#0891b2',
+        }}
+      >
+        <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>
+          AI–Suggested Monthly Budget (Rs.)
+        </Text>
 
-    setIsSaving(true);
-    const { error } = await supabase
-      .from('categories')
-      .update({ limit_: newLimit })
-      .eq('id', category.id);
+        <Section title="Critical (Essentials)" items={buckets.critical} />
+        <Section title="Flex" items={buckets.flex} />
+        <Section title="Emergency" items={buckets.buffer} />
 
-    setIsSaving(false);
-    if (error) {
-      Alert.alert('Failed to update limit');
-    } else {
-      await fetchCategories();
-    }
+        <Text style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+          You can still edit any limit in the category cards below.
+        </Text>
+      </View>
+    );
   };
 
-  return (
-    <View style={[styles.categoryCard, { backgroundColor: category.color }]}>
-      <View style={styles.categoryContent}>
-        <View style={styles.categoryIconContainer}>
-          <Text style={styles.categoryIcon}>{category.icon}</Text>
-        </View>
+  /* Category card with inline validation */
+  const CategoryCard = ({ category }) => {
+    const remaining = (Number(category.limit) || 0) - (Number(category.spent) || 0);
+    const isOverBudget = remaining < 0;
 
-        <View style={styles.categoryInfo}>
-          <Text style={styles.categoryName}>{category.name}</Text>
-          <View style={styles.categoryActions}>
-            <TouchableOpacity onPress={() => handleEdit(category)} style={styles.actionButton}>
-              <Text style={styles.actionText}>Edit</Text>
-            </TouchableOpacity>
-            <Text style={styles.separator}>|</Text>
-            <TouchableOpacity onPress={() => handleDelete(category)} style={styles.actionButton}>
-              <Text style={styles.actionText}>Remove</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+    const [editedLimit, setEditedLimit] = useState(String(category.limit));
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
 
-        <View style={styles.categoryStats}>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Limit</Text>
-            <TextInput
-              value={editedLimit}
-              onChangeText={setEditedLimit}
-              onBlur={saveLimit}
-              editable={!isSaving}
-              keyboardType="numeric"
-              style={{
-                borderWidth: 1,
-                borderColor: '#ccc',
-                borderRadius: 6,
-                paddingHorizontal: 6,
-                paddingVertical: 4,
-                fontWeight: '600',
-                minWidth: 80,
-                color: '#1F2937',
-                backgroundColor: '#fff',
-              }}
-            />
+    useEffect(() => {
+      setEditedLimit(String(category.limit));
+    }, [category.limit]);
+
+    const saveLimit = async () => {
+      setError('');
+      const newLimit = parseMoney(editedLimit);
+      if (newLimit === null) {
+        setError('Enter a valid amount');
+        return;
+      }
+      const currentLimit = Number(category.limit || 0);
+      const newTotal = (Number(totals?.total) || 0) - currentLimit + newLimit;
+      if ((Number(userIncome) || 0) > 0 && newTotal > Number(userIncome)) {
+      setError(`That would exceed your income by Rs. ${money(newTotal - userIncome)}.`);
+      return;
+    }
+
+      setIsSaving(true);
+      const { error: upErr } = await supabase.from('categories').update({ limit_: newLimit }).eq('id', category.id);
+      setIsSaving(false);
+      if (upErr) Alert.alert('Failed to update limit');
+      else await fetchCategories();
+    };
+
+    const onChange = (text) => {
+      const numeric = text.replace(/[^0-9.]/g, '');
+      const parts = numeric.split('.');
+      const formatted = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : numeric;
+      setEditedLimit(formatted);
+    };
+
+    return (
+      <View style={[styles.categoryCard, { backgroundColor: category.color }]}>
+        <View style={styles.categoryContent}>
+          <View style={styles.categoryIconContainer}>
+            <Text style={styles.categoryIcon}>{category.icon}</Text>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Remaining</Text>
-            <Text style={[styles.statValue, isOverBudget && styles.overBudget]}>
-              Rs.{remaining.toFixed(2)}
-            </Text>
+
+          <View style={styles.categoryInfo}>
+            <Text style={styles.categoryName}>{category.name}</Text>
+            <View style={styles.categoryActions}>
+              <TouchableOpacity onPress={() => handleEdit(category)} style={styles.actionButton}>
+                <Text style={styles.actionText}>Edit</Text>
+              </TouchableOpacity>
+              <Text style={styles.separator}>|</Text>
+              <TouchableOpacity onPress={() => handleDelete(category)} style={styles.actionButton}>
+                <Text style={styles.actionText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.categoryStats}>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Limit</Text>
+              <TextInput
+                value={editedLimit}
+                onChangeText={onChange}
+                onBlur={saveLimit}
+                editable={!isSaving}
+                keyboardType="decimal-pad"
+                style={{
+                  borderWidth: 1,
+                  borderColor: error ? '#DC2626' : '#ccc',
+                  borderRadius: 6,
+                  paddingHorizontal: 6,
+                  paddingVertical: 4,
+                  fontWeight: '600',
+                  minWidth: 80,
+                  color: '#1F2937',
+                  backgroundColor: '#fff',
+                }}
+              />
+              {!!error && <Text style={{ color: '#DC2626', fontSize: 12 }}>{error}</Text>}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Remaining</Text>
+              <Text style={[styles.statValue, isOverBudget && styles.overBudget]}>Rs.{money(remaining)}</Text>
+            </View>
           </View>
         </View>
       </View>
-    </View>
-  );
-};
+    );
+  };
 
   if (loading) return <LoadingSpinner />;
 
@@ -1059,67 +861,81 @@ const RecommendationDisplay = () => {
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <Header />
 
-      <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="none"
-      >
-        <View style={styles.summaryContainer}>
-          <Text style={styles.summaryLabel}>Remaining (Monthly)</Text>
-          <Text style={styles.summaryAmount}>Rs.{totalRemaining.toFixed(2)}</Text>
+      {/* Budget totals banner (rounded) */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+        {userIncome <= 0 ? (
+          <Text style={{ color: '#DC2626' }}>
+            Add your monthly income to keep budgets in check.
+          </Text>
+        ) : totals.over ? (
+          <Text style={{ color: '#DC2626' }}>
+            Over by Rs. {money(totals.total - userIncome)}. Lower your limits to fit your income.
+          </Text>
+        ) : (
+          <Text style={{ color: '#065f46' }}>
+            Left to assign: Rs. {money(totals.leftover)} (Total {money(totals.total)} / Income {money(userIncome)})
+          </Text>
+        )}
+      </View>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="none">
+        <View style={{ padding: 20 }}>
+          <TouchableOpacity
+            onPress={handleGetAIBudget}
+            style={{
+              padding: 15,
+              backgroundColor: isLoadingRecommendation ? '#94a3b8' : '#0891b2',
+              borderRadius: 10,
+              alignItems: 'center',
+              marginBottom: 10,
+            }}
+            disabled={isLoadingRecommendation}
+          >
+            {isLoadingRecommendation ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>🤖 Get AI Budget</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Grouped AI Summary */}
+          <RecommendationDisplay />
         </View>
-<View style={{ padding: 20 }}>
-  <TouchableOpacity
-    onPress={handleGetAIBudget}
-    style={{
-      padding: 15,
-      backgroundColor: isLoadingRecommendation ? '#94a3b8' : '#0891b2',
-      borderRadius: 10,
-      alignItems: 'center',
-      marginBottom: 10
-    }}
-    disabled={isLoadingRecommendation}
-  >
-    {isLoadingRecommendation ? (
-      <ActivityIndicator color="#fff" />
-    ) : (
-      <Text style={{ color: '#fff', fontWeight: 'bold' }}>
-        🤖 Get AI Budget
-      </Text>
-    )}
-  </TouchableOpacity>
 
-  {!!recommendation && (
-    <View style={{
-      marginTop: 10, padding: 14, backgroundColor: '#f0f9ff',
-      borderRadius: 12, borderWidth: 1, borderColor: '#0891b2'
-    }}>
-      <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>
-        AI–Suggested Monthly Budget (Rs.)
-      </Text>
-      {Object.entries(recommendation).map(([name, amt]) => {
-        const pct = userIncome ? ((Number(amt) / userIncome) * 100).toFixed(1) : null;
-        return (
-          <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', marginVertical: 4 }}>
-            <Text style={{ fontWeight: '600' }}>{name}</Text>
-            <Text>Rs. {Number(amt).toLocaleString()} {pct ? `(${pct}%)` : ''}</Text>
-          </View>
-        );
-      })}
-      <Text style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
-        You can still edit any limit in the category cards below.
-      </Text>
-    </View>
-  )}
-</View>
-  
+        {/* Grouped category cards */}
+        <View style={{ paddingHorizontal: 16, marginTop: 10 }}>
+          {grouped.crit.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontWeight: '700', marginBottom: 6 }}>
+                Critical (Essentials) — Rs. {money(grouped.totals.crit)}
+              </Text>
+              {grouped.crit.map((category) => (
+                <CategoryCard key={category.id} category={category} />
+              ))}
+            </View>
+          )}
 
+          {grouped.flex.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontWeight: '700', marginBottom: 6 }}>
+                Discretionary / Flex — Rs. {money(grouped.totals.flex)}
+              </Text>
+              {grouped.flex.map((category) => (
+                <CategoryCard key={category.id} category={category} />
+              ))}
+            </View>
+          )}
 
-        <View style={styles.categoriesContainer}>
-          {filteredCategories.map((category) => (
-            <CategoryCard key={category.id} category={category} />
-          ))}
+          {grouped.buffer.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontWeight: '700', marginBottom: 6 }}>
+                Emergency Buffer — Rs. {money(grouped.totals.buffer)}
+              </Text>
+              {grouped.buffer.map((category) => (
+                <CategoryCard key={category.id} category={category} />
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.bottomPadding} />
@@ -1130,18 +946,11 @@ const RecommendationDisplay = () => {
       </TouchableOpacity>
 
       <View style={styles.bottomNav}>
-        <TouchableOpacity
-
-          style={[styles.navItem, styles.navItemInactive]}
-          onPress={onBack}
-        >
+        <TouchableOpacity style={[styles.navItem, styles.navItemInactive]} onPress={onBack}>
           <Home size={24} color="white" />
           <Text style={styles.navText}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.navItem, styles.navItemInactive]}
-          onPress={onTransactions}
-        >
+        <TouchableOpacity style={[styles.navItem, styles.navItemInactive]} onPress={onTransactions}>
           <DollarSign size={24} color="white" />
           <Text style={styles.navText}>Transactions</Text>
         </TouchableOpacity>
@@ -1149,21 +958,14 @@ const RecommendationDisplay = () => {
           <Wallet size={24} color="white" />
           <Text style={styles.navText}>Accounts</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.navItem, styles.navItemInactive]}
-          onPress={toggleMoreMenu}
-        >
+        <TouchableOpacity style={[styles.navItem, styles.navItemInactive]} onPress={toggleMoreMenu}>
           <MoreHorizontal size={24} color="white" />
           <Text style={styles.navText}>More</Text>
         </TouchableOpacity>
       </View>
 
       {/* More Menu */}
-      <MoreMenu
-        isOpen={isMoreMenuOpen}
-        onClose={closeMoreMenu}
-        onLogout={handleLogoutClick}
-      />
+      <MoreMenu isOpen={isMoreMenuOpen} onClose={closeMoreMenu} onLogout={handleLogoutClick} />
 
       {/* Form Modal */}
       <CategoryFormModal
@@ -1173,6 +975,7 @@ const RecommendationDisplay = () => {
         initialData={formInitialData}
         availableIcons={availableIcons}
         availableColors={availableColors}
+        existingNames={categories.map((c) => norm(c.name))}
       />
 
       {/* Delete Modal */}
@@ -1185,6 +988,11 @@ const RecommendationDisplay = () => {
     </SafeAreaView>
   );
 };
+
+
+
+
+
 
 /* ------------------------------------------------------------------ */
 /* ------------------------------- STYLES --------------------------- */
@@ -1206,7 +1014,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   header: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#008080',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -1214,6 +1022,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   headerTop: {
+    
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1223,11 +1032,12 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 8,
     borderRadius: 8,
+    
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#1F2937',
+    color: '#ffffff',
   },
   placeholder: {
     width: 40,
@@ -1636,5 +1446,6 @@ const styles = StyleSheet.create({
 });
 
 export default CategoryManager;
+
 
 

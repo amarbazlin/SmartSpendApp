@@ -14,188 +14,182 @@ import {
   Dimensions,
 } from 'react-native';
 import { supabase } from '../services/supabase';
+import { fetchRecommendation } from '../screens/fetchRecommendation';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+// defaults for newly created categories
+const DEFAULT_ICON = '📦';
+const DEFAULT_COLOR = '#E8E8E8';
+
+// ensure the user's chosen categories exist in `categories` (type='expense')
+async function ensureUserCategories(userId, names) {
+  const uniq = [...new Set((names || []).map(n => n.trim()).filter(Boolean))];
+  if (!uniq.length) return;
+
+  const { data: existing, error: exErr } = await supabase
+    .from('categories')
+    .select('name')
+    .eq('user_id', userId)
+    .eq('type', 'expense');
+
+  if (exErr) throw exErr;
+
+  const existingNames = new Set(existing?.map(r => r.name) || []);
+  const toInsert = uniq
+    .filter(n => !existingNames.has(n))
+    .map(n => ({
+      user_id: userId,
+      type: 'expense',
+      name: n,
+      icon: DEFAULT_ICON,
+      color: DEFAULT_COLOR,
+      limit_: 0, // AI will fill after
+    }));
+
+  if (toInsert.length) {
+    const { error: insErr } = await supabase.from('categories').insert(toInsert);
+    if (insErr) throw insErr;
+  }
+}
+
 export default function AuthScreen() {
   const [isRegistering, setIsRegistering] = useState(false);
-  const [currentStep, setCurrentStep] = useState(0);
+  const [currentStep, setCurrentStep] = useState(0); // 0 name, 1 theme, 2 email/pw, 3 age, 4 income, 5 categories
   const [busy, setBusy] = useState(false);
+  const [customCategory, setCustomCategory] = useState('');
 
   const [registrationData, setRegistrationData] = useState({
     name: '',
     email: '',
     password: '',
+    theme: 'light',
     age: '',
     monthly_income: '',
-    gender: '',
-    employment: '',
     spending_categories: [],
   });
 
-  const [loginData, setLoginData] = useState({
-    email: '',
-    password: '',
-  });
+  const [loginData, setLoginData] = useState({ email: '', password: '' });
 
   const validateEmail = (email) => /\S+@\S+\.\S+/.test(email);
 
   const validateCurrentStep = () => {
-    const { name, email, password, age, monthly_income, gender, employment } = registrationData;
+    const { name, email, password, age, monthly_income, theme } = registrationData;
 
     switch (currentStep) {
       case 0:
-        if (!name.trim()) {
-          Alert.alert('Please enter your name');
-          return false;
-        }
+        if (!name.trim()) { Alert.alert('Please enter your name'); return false; }
         return true;
       case 1:
-        if (!email || !password) {
-          Alert.alert('Please fill all fields');
-          return false;
-        }
-        if (!validateEmail(email)) {
-          Alert.alert('Please enter a valid email');
-          return false;
-        }
-        if (password.length < 6) {
-          Alert.alert('Password must be at least 6 characters');
-          return false;
-        }
+        if (!theme) { Alert.alert('Please select a theme'); return false; }
         return true;
-      case 2: {
-        const ageNum = parseInt(age, 10);
-        if (!age || isNaN(ageNum) || ageNum < 13 || ageNum > 100) {
-          Alert.alert('Please enter a valid age (13-100)');
-          return false;
-        }
+      case 2:
+        if (!email || !password) { Alert.alert('Please fill all fields'); return false; }
+        if (!validateEmail(email)) { Alert.alert('Please enter a valid email'); return false; }
+        if (password.length < 6) { Alert.alert('Password must be at least 6 characters'); return false; }
         return true;
-      }
       case 3: {
-        const income = parseFloat(monthly_income);
-        if (!monthly_income || isNaN(income) || income <= 0) {
-          Alert.alert('Please enter a valid monthly income');
-          return false;
-        }
+        const n = parseInt(age, 10);
+        if (!age || isNaN(n) || n < 13 || n > 100) { Alert.alert('Please enter a valid age (13-100)'); return false; }
         return true;
       }
-      case 4:
-        if (!gender) {
-          Alert.alert('Please select your gender');
-          return false;
-        }
+      case 4: {
+        const inc = parseFloat(monthly_income);
+        if (!monthly_income || isNaN(inc) || inc <= 0) { Alert.alert('Please enter a valid monthly income'); return false; }
         return true;
-      case 5:
-        if (!employment) {
-          Alert.alert('Please select your employment status');
-          return false;
-        }
-        return true;
+      }
       default:
-        return true;
+        return true; // categories step doesn't block
     }
   };
 
   const handleNext = () => {
     if (!validateCurrentStep()) return;
-
-    if (currentStep < 6) {
-      setCurrentStep(currentStep + 1);
-    } else {
-      handleRegister();
-    }
+    if (currentStep < 5) setCurrentStep(s => s + 1);
+    else handleRegister();
   };
 
-  const updateRegistrationData = (field, value) => {
-    setRegistrationData((prev) => ({ ...prev, [field]: value }));
-  };
+  const updateRegistrationData = (field, value) =>
+    setRegistrationData(prev => ({ ...prev, [field]: value }));
 
   const handleBack = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
-    } else {
-      setIsRegistering(false);
-      setCurrentStep(0);
-    }
+    if (currentStep > 0) setCurrentStep(s => s - 1);
+    else { setIsRegistering(false); setCurrentStep(0); }
+  };
+
+  const handleAddCustomCategory = () => {
+    const name = (customCategory || '').trim();
+    if (!name) return;
+    setRegistrationData(prev => ({
+      ...prev,
+      spending_categories: [...new Set([...prev.spending_categories, name])],
+    }));
+    setCustomCategory('');
   };
 
   const handleRegister = async () => {
     try {
       setBusy(true);
 
+      // 1) create auth user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: registrationData.email,
         password: registrationData.password,
         options: {
-          data: {
-            name: registrationData.name,
-            full_name: registrationData.name,
-          },
+          data: { name: registrationData.name, full_name: registrationData.name },
           emailRedirectTo: undefined,
         },
       });
-
       if (authError) {
-        if (authError.message?.includes('User already registered')) {
-          Alert.alert('Account already exists', 'There is already an account for this email.');
-        } else {
-          Alert.alert('Sign up failed', authError.message);
-        }
+        Alert.alert('Sign up failed', authError.message ?? 'Unknown error');
         return;
       }
 
-      if (authData.user) {
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert([
-            {
-              id: authData.user.id,
-              email: registrationData.email,
-              name: registrationData.name,
-              age: parseInt(registrationData.age, 10),
-              monthly_income: parseFloat(registrationData.monthly_income),
-              gender: registrationData.gender,
-              employment: registrationData.employment,
-              spending_categories: registrationData.spending_categories,
-              created_at: new Date().toISOString(),
-            },
-          ]);
+      // 2) create profile row + categories + initial AI limits
+      if (authData?.user?.id) {
+        const uid = authData.user.id;
 
+        const { error: profileError } = await supabase.from('users').insert([{
+          id: uid,
+          email: registrationData.email,
+          name: registrationData.name,
+          age: parseInt(registrationData.age, 10),
+          monthly_income: parseFloat(registrationData.monthly_income),
+          spending_categories: registrationData.spending_categories,
+          created_at: new Date().toISOString(),
+        }]);
         if (profileError) {
-          Alert.alert('Profile Error', `Failed to create profile: ${profileError.message}`);
+          Alert.alert('Profile Error', profileError.message);
           return;
         }
 
-        // ✨ NOTE:
-        // We removed the old `generateInitialBudget()` call.
-        // Your AI budgeting now happens inside the app (e.g. in Categories screen)
-        // when the user requests it, using your local (or in-app) model logic.
+        await ensureUserCategories(uid, registrationData.spending_categories);
+
+        // Fill initial limits so category cards are pre-populated
+        try {
+          await fetchRecommendation(uid); // writes limit_ for the user's categories
+        } catch (e) {
+          console.log('Initial AI budget failed (non-blocking):', e?.message);
+        }
       }
 
-      Alert.alert(
-        'Registration Successful!',
-        'Your account is ready. Please sign in.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setIsRegistering(false);
-              setCurrentStep(0);
-              setRegistrationData({
-                name: '',
-                email: '',
-                password: '',
-                age: '',
-                monthly_income: '',
-                gender: '',
-                employment: '',
-                spending_categories: [],
-              });
-            },
+      Alert.alert('Registration Successful!', 'Your account is ready.', [
+        {
+          text: 'OK',
+          onPress: () => {
+            setIsRegistering(false);
+            setCurrentStep(0);
+            setRegistrationData({
+              name: '',
+              email: '',
+              password: '',
+              age: '',
+              monthly_income: '',
+              spending_categories: [],
+            });
           },
-        ]
-      );
+        },
+      ]);
     } catch (e) {
       Alert.alert('Sign up failed', e.message);
     } finally {
@@ -204,27 +198,13 @@ export default function AuthScreen() {
   };
 
   const handleLogin = async () => {
-    if (!loginData.email || !loginData.password) {
-      Alert.alert('Please fill all fields');
-      return;
-    }
-    if (!validateEmail(loginData.email)) {
-      Alert.alert('Please enter a valid email');
-      return;
-    }
+    if (!loginData.email || !loginData.password) { Alert.alert('Please fill all fields'); return; }
+    if (!validateEmail(loginData.email)) { Alert.alert('Please enter a valid email'); return; }
 
     try {
       setBusy(true);
-      const { error } = await supabase.auth.signInWithPassword({
-        email: loginData.email,
-        password: loginData.password,
-      });
-
-      if (error) {
-        Alert.alert('Login failed', error.message);
-        return;
-      }
-      // on success, your app-level navigation should take over
+      const { error } = await supabase.auth.signInWithPassword(loginData);
+      if (error) { Alert.alert('Login failed', error.message); return; }
     } catch (e) {
       Alert.alert('Login failed', e.message);
     } finally {
@@ -233,199 +213,142 @@ export default function AuthScreen() {
   };
 
   const renderRegistrationStep = () => {
-    const { name, email, password, age, monthly_income, gender, employment } = registrationData;
+    const { name, email, password, age, monthly_income, theme, spending_categories } = registrationData;
 
-    switch (currentStep) {
-      case 0:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>What's your name?</Text>
-            <Text style={styles.stepSubtitle}>We'd love to get to know you better</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your full name"
-              value={name}
-              onChangeText={(value) => updateRegistrationData('name', value)}
-              autoCapitalize="words"
-              autoFocus
-            />
-          </View>
-        );
-
-      case 1:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>Create your account</Text>
-            <Text style={styles.stepSubtitle}>We'll keep your information secure</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Email address"
-              value={email}
-              onChangeText={(value) => updateRegistrationData('email', value)}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Create a password"
-              secureTextEntry
-              value={password}
-              onChangeText={(value) => updateRegistrationData('password', value)}
-            />
-          </View>
-        );
-
-      case 2:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>How old are you?</Text>
-            <Text style={styles.stepSubtitle}>This helps us personalize your experience</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Age"
-              value={age}
-              onChangeText={(value) => updateRegistrationData('age', value)}
-              keyboardType="numeric"
-              maxLength={3}
-              autoFocus
-            />
-          </View>
-        );
-
-      case 3:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>What's your monthly income?</Text>
-            <Text style={styles.stepSubtitle}>This helps us create better budget recommendations</Text>
-            <View style={styles.incomeContainer}>
-              <Text style={styles.currencySymbol}>Rs.</Text>
-              <TextInput
-                style={[styles.input, styles.incomeInput]}
-                placeholder="50000"
-                value={monthly_income}
-                onChangeText={(value) => updateRegistrationData('monthly_income', value)}
-                keyboardType="numeric"
-                autoFocus
-              />
-            </View>
-          </View>
-        );
-
-      case 4:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>Select your gender</Text>
-            <Text style={styles.stepSubtitle}>This helps us provide relevant recommendations</Text>
-            <View style={styles.optionsContainer}>
-              {['Male', 'Female', 'Other'].map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={[
-                    styles.optionButton,
-                    gender === option.toLowerCase() && styles.selectedOption,
-                  ]}
-                  onPress={() => updateRegistrationData('gender', option.toLowerCase())}
-                >
-                  <Text
-                    style={[
-                      styles.optionText,
-                      gender === option.toLowerCase() && styles.selectedOptionText,
-                    ]}
-                  >
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        );
-
-      case 5:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>Employment status</Text>
-            <Text style={styles.stepSubtitle}>This helps us understand your financial situation</Text>
-            <View style={styles.optionsContainer}>
-              {[
-                { label: 'Employed Full-time', value: 'employed' },
-                { label: 'Employed Part-time', value: 'part_time' },
-                { label: 'Self-employed', value: 'self_employed' },
-                { label: 'Student', value: 'student' },
-                { label: 'Unemployed', value: 'unemployed' },
-                { label: 'Retired', value: 'retired' },
-              ].map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.optionButton,
-                    employment === option.value && styles.selectedOption,
-                  ]}
-                  onPress={() => updateRegistrationData('employment', option.value)}
-                >
-                  <Text
-                    style={[
-                      styles.optionText,
-                      employment === option.value && styles.selectedOptionText,
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        );
-
-      case 6:
-        return (
-          <View style={styles.stepContainer}>
-            <Text style={styles.stepTitle}>Spending Categories</Text>
-            <Text style={styles.stepSubtitle}>Select what you typically spend on</Text>
-            <View style={styles.optionsContainer}>
-              {[
-                'Food',
-                'Housing',
-                'Transport',
-                'Utilities',
-                'Savings',
-                'Entertainment',
-                'Healthcare',
-                'Shopping',
-              ].map((category) => (
-                <TouchableOpacity
-                  key={category}
-                  style={[
-                    styles.optionButton,
-                    registrationData.spending_categories.includes(category) &&
-                      styles.selectedOption,
-                  ]}
-                  onPress={() => {
-                    setRegistrationData((prev) => {
-                      const selected = prev.spending_categories.includes(category)
-                        ? prev.spending_categories.filter((c) => c !== category)
-                        : [...prev.spending_categories, category];
-                      return { ...prev, spending_categories: selected };
-                    });
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.optionText,
-                      registrationData.spending_categories.includes(category) &&
-                        styles.selectedOptionText,
-                    ]}
-                  >
-                    {category}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        );
-
-      default:
-        return null;
+    // 0) name
+    if (currentStep === 0) {
+      return (
+        <View style={styles.stepContainer}>
+          <Text style={styles.stepTitle}>What's your name?</Text>
+          <Text style={styles.stepSubtitle}>We'd love to get to know you better</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter your full name"
+            value={name}
+            onChangeText={v => updateRegistrationData('name', v)}
+            autoCapitalize="words"
+            autoFocus
+          />
+        </View>
+      );
     }
+
+    
+
+    // 2) email/password
+    if (currentStep === 1) {
+      return (
+        <View style={styles.stepContainer}>
+          <Text style={styles.stepTitle}>Create your account</Text>
+          <Text style={styles.stepSubtitle}>We'll keep your information secure</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Email address"
+            value={email}
+            onChangeText={v => updateRegistrationData('email', v)}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Create a password"
+            secureTextEntry
+            value={password}
+            onChangeText={v => updateRegistrationData('password', v)}
+          />
+        </View>
+      );
+    }
+
+    // 3) age
+    if (currentStep === 2) {
+      return (
+        <View style={styles.stepContainer}>
+          <Text style={styles.stepTitle}>How old are you?</Text>
+          <Text style={styles.stepSubtitle}>This helps us personalize your experience</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Age"
+            value={age}
+            onChangeText={v => updateRegistrationData('age', v)}
+            keyboardType="numeric"
+            maxLength={3}
+            autoFocus
+          />
+        </View>
+      );
+    }
+
+    // 4) monthly income
+    if (currentStep === 3) {
+      return (
+        <View style={styles.stepContainer}>
+          <Text style={styles.stepTitle}>What's your monthly income?</Text>
+          <Text style={styles.stepSubtitle}>This helps us create better budget recommendations</Text>
+          <View style={styles.incomeContainer}>
+            <Text style={styles.currencySymbol}>Rs.</Text>
+            <TextInput
+              style={[styles.input, styles.incomeInput]}
+              placeholder="50000"
+              value={monthly_income}
+              onChangeText={v => updateRegistrationData('monthly_income', v)}
+              keyboardType="numeric"
+              autoFocus
+            />
+          </View>
+        </View>
+      );
+    }
+
+    // 5) categories + add custom
+    const defaults = [
+      'Food','Housing','Transport','Utilities','Savings','Entertainment','Healthcare','Education'
+    ];
+
+    return (
+      <View style={styles.stepContainer}>
+        <Text style={styles.stepTitle}>Spending Categories</Text>
+        <Text style={styles.stepSubtitle}>Select what you typically spend on — and add your own</Text>
+
+        <View style={styles.optionsContainer}>
+          {defaults.map(category => {
+            const selected = spending_categories.includes(category);
+            return (
+              <TouchableOpacity
+                key={category}
+                style={[styles.optionButton, selected && styles.selectedOption]}
+                onPress={() => {
+                  setRegistrationData(prev => {
+                    const next = selected
+                      ? prev.spending_categories.filter(c => c !== category)
+                      : [...prev.spending_categories, category];
+                    return { ...prev, spending_categories: next };
+                  });
+                }}
+              >
+                <Text style={[styles.optionText, selected && styles.selectedOptionText]}>
+                  {category}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* add custom */}
+        <View style={styles.customAddRow}>
+          <TextInput
+            style={[styles.input, styles.customAddInput]}
+            placeholder="Add custom category"
+            value={customCategory}
+            onChangeText={setCustomCategory}
+            autoCapitalize="words"
+          />
+          <TouchableOpacity style={styles.customAddButton} onPress={handleAddCustomCategory}>
+            <Text style={styles.customAddButtonText}>Add</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   };
 
   const renderLoginForm = () => (
@@ -439,7 +362,7 @@ export default function AuthScreen() {
         value={loginData.email}
         autoCapitalize="none"
         keyboardType="email-address"
-        onChangeText={(value) => setLoginData((prev) => ({ ...prev, email: value }))}
+        onChangeText={v => setLoginData(prev => ({ ...prev, email: v }))}
       />
 
       <TextInput
@@ -447,7 +370,7 @@ export default function AuthScreen() {
         placeholder="Password"
         secureTextEntry
         value={loginData.password}
-        onChangeText={(value) => setLoginData((prev) => ({ ...prev, password: value }))}
+        onChangeText={v => setLoginData(prev => ({ ...prev, password: v }))}
       />
 
       <TouchableOpacity
@@ -473,27 +396,20 @@ export default function AuthScreen() {
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${((currentStep + 1) / 7) * 100}%` }]} />
+        <View style={[styles.progressFill, { width: `${((currentStep + 1) / 6) * 100}%` }]} />
       </View>
-      <Text style={styles.progressText}>{currentStep + 1} of 7</Text>
+      <Text style={styles.progressText}>{currentStep + 1} of 6</Text>
     </View>
   );
 
   if (!isRegistering) {
     return (
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.header}>
             <View style={styles.headerCenter}>
               <View style={styles.logo}>
-                <Image
-                  source={require('./images/App_Logo.png')}
-                  style={styles.logoImage}
-                  resizeMode="contain"
-                />
+                <Image source={require('./images/App_Logo.png')} style={styles.logoImage} resizeMode="contain" />
               </View>
               <Text style={styles.logoLabel}>SmartSpend</Text>
             </View>
@@ -505,22 +421,15 @@ export default function AuthScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.select({ ios: 'padding', android: undefined })}
-    >
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
       <View style={styles.container}>
-        <View className="registrationHeader" style={styles.registrationHeader}>
+        <View style={styles.registrationHeader}>
           <TouchableOpacity onPress={handleBack} style={styles.backButton}>
             <Text style={styles.backButtonText}>←</Text>
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={styles.logoSmall}>
-              <Image
-                source={require('./images/App_Logo.png')}
-                style={styles.logoImage}
-                resizeMode="contain"
-              />
+              <Image source={require('./images/App_Logo.png')} style={styles.logoImage} resizeMode="contain" />
             </View>
           </View>
           <View style={styles.placeholder} />
@@ -539,7 +448,7 @@ export default function AuthScreen() {
             disabled={busy}
           >
             <Text style={styles.buttonText}>
-              {busy ? 'Please wait...' : currentStep === 6 ? 'Create Account' : 'Continue'}
+              {busy ? 'Please wait...' : currentStep === 5 ? 'Create Account' : 'Continue'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -548,10 +457,32 @@ export default function AuthScreen() {
   );
 }
 
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+    customAddRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  customAddInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  customAddButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#00B8A9',
+    borderRadius: 12,
+  },
+  customAddButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
   },
   scrollContent: {
     flexGrow: 1,

@@ -36,6 +36,10 @@ const TransactionForm = ({
   mode = 'add',
   editTransaction,
   onUpdate,
+
+  // NEW: remaining balance you want to protect (e.g., monthly total = income - expenses)
+  // Pass this from Home screen. If not provided, no blocking will occur.
+  availableThisMonth = Number.POSITIVE_INFINITY,
 }) => {
   const [selectedTab, setSelectedTab] = useState(transactionType);
   const [date] = useState(
@@ -177,10 +181,32 @@ const TransactionForm = ({
   const handleSubmit = () => {
     if (!validateForm()) return;
 
+    const amt = parseFloat(amount);
+
+    // NEW: Block expenses that would make total negative
+    if (selectedTab === 'expense') {
+      // If editing an expense, user can reuse the original amount without being blocked.
+      const originalExpenseAmount =
+        mode === 'edit' && editTransaction?.type === 'expense'
+          ? Number(editTransaction.amount || 0)
+          : 0;
+
+      // Allowed headroom = remaining + original (when editing)
+      const allowed = (isFinite(availableThisMonth) ? availableThisMonth : Number.POSITIVE_INFINITY) + originalExpenseAmount;
+
+      if (amt > allowed) {
+        Alert.alert(
+          'Not allowed',
+          `This expense exceeds your available total.\nAvailable: ${allowed.toFixed(2)}`
+        );
+        return;
+      }
+    }
+
     const payload = {
       type: selectedTab,
       date: ymdLocal(new Date()),
-      amount: parseFloat(amount),
+      amount: amt,
       category,
       category_id: selectedCategoryId,
       account,
@@ -243,7 +269,7 @@ const TransactionForm = ({
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>Category</Text>
+            <Text style={styles.modalTitle}>Category</Text>
             <View style={styles.modalHeaderButtons}>
               <TouchableOpacity style={styles.modalHeaderButton}>
                 <Edit3 size={20} color="#9CA3AF" />

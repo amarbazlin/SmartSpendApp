@@ -5,7 +5,7 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
+  StyleSheet, // keep; your styles live at the bottom in your project
   SafeAreaView,
   ScrollView,
   Image,
@@ -354,6 +354,9 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
   const [selectedTransaction, setSelectedTransaction] = useState(null);
 
+  // NEW: filter which type to show (default = 'all' == Total)
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'income' | 'expense'
+
   const today = new Date();
   const monthStart = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
   const nextMonthStart = useMemo(() => new Date(today.getFullYear(), today.getMonth() + 1, 1), [today]);
@@ -404,7 +407,29 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     setShowTransactionForm(true);
   };
 
-  /** INSERT: called ONLY by the parent now */
+  /* ---------- Negative-total guard helpers ---------- */
+  const getMonthBoundsFromDateString = (dateStr) => {
+    const d = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
+    return {
+      start: new Date(d.getFullYear(), d.getMonth(), 1),
+      end: new Date(d.getFullYear(), d.getMonth() + 1, 1),
+    };
+  };
+
+  const getMonthlyTotalsForDate = useCallback((dateStr) => {
+    const { start, end } = getMonthBoundsFromDateString(dateStr);
+    let inc = 0, exp = 0;
+    for (const t of transactions) {
+      const td = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
+      if (td >= start && td < end) {
+        if (t.type === 'income') inc += Number(t.amount || 0);
+        else if (t.type === 'expense') exp += Number(t.amount || 0);
+      }
+    }
+    return { inc, exp, start, end };
+  }, [transactions]);
+
+  /** INSERT (Add) */
   const handleTransactionAdded = useCallback(async (t) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
@@ -419,6 +444,21 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       const amt = Number(t.amount);
       if (!isFinite(amt)) {
         throw new Error('Parsed amount is invalid');
+      }
+
+      const localDate = t.date || ymdLocal(new Date());
+
+      // GUARD: block expense that would make the month negative
+      if (t.type === 'expense') {
+        const { inc, exp } = getMonthlyTotalsForDate(localDate);
+        const available = inc - exp;
+        if (amt > available) {
+          safeAlert(
+            'Not allowed',
+            `This expense would make your monthly total negative.\nAvailable this month: Rs. ${available.toFixed(2)}`
+          );
+          return; // do NOT insert
+        }
       }
 
       let catId = t.category_id ?? null;
@@ -441,17 +481,13 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         }
       }
 
-      const localDate = t.date || ymdLocal(new Date());
-
       if (t.type === 'income') {
-        // IMPORTANT: Do NOT send description if your table doesn't have it
         const { error } = await supabase.from('income').insert([{
           user_id: user.id,
           source: t.category || 'Other',
           amount: amt,
           date: localDate,
           note: t.note || null,
-          // description removed – add back only if you added the column
         }]);
         if (error) throw error;
       } else {
@@ -476,13 +512,32 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     } finally {
       isSubmittingRef.current = false;
     }
-  }, [fetchTransactions, safeAlert]);
+  }, [fetchTransactions, safeAlert, getMonthlyTotalsForDate]);
 
   /** UPDATE */
   const handleTransactionUpdated = useCallback(async (payload) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     try {
+      // GUARD: editing an expense must not make month negative
+      if (editTx && editTx.type === 'expense') {
+        const targetDate = editTx.date || ymdLocal(new Date());
+        const { inc, exp } = getMonthlyTotalsForDate(targetDate);
+
+        const currentAmt = Number(editTx.amount || 0);
+        const proposedAmt = Number(payload.amount);
+
+        // remove original from month then check with proposed
+        const availableIfWeRemoveOriginal = inc - (exp - currentAmt);
+        if (proposedAmt > availableIfWeRemoveOriginal) {
+          safeAlert(
+            'Not allowed',
+            `This update would make your monthly total negative.\nAvailable for this month: Rs. ${availableIfWeRemoveOriginal.toFixed(2)}`
+          );
+          return; // do NOT update
+        }
+      }
+
       const { error } = await supabase.rpc('update_transaction', {
         t_type: editTx.type,
         t_id: editTx.id,
@@ -491,7 +546,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         t_source: payload.category ?? null,
         t_payment_method: payload.account ?? null,
         t_note: payload.note ?? null,
-        // add t_description if your RPC supports it
       });
       if (error) throw error;
 
@@ -505,7 +559,7 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     } finally {
       isSubmittingRef.current = false;
     }
-  }, [editTx, fetchTransactions, safeAlert]);
+  }, [editTx, fetchTransactions, safeAlert, getMonthlyTotalsForDate]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -521,11 +575,11 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
 
-      const { data, error } = await supabase
-        .from('transactions') // view
-        .select('*')
-        .eq('user_id', user.id)
-        .order('date', { ascending: false });
+    const { data, error } = await supabase
+      .from('transactions') // view
+      .select('*')
+      .eq('user_id', user.id)
+      .order('date', { ascending: false });
 
       if (error) throw error;
 
@@ -614,12 +668,18 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     return { incomeDay, expenseDay };
   }, [transactions]);
 
+  // NEW: apply summary filter to transactions for the list views
+  const filteredTransactions = useMemo(() => {
+    if (typeFilter === 'all') return transactions;
+    return transactions.filter(t => t.type === typeFilter);
+  }, [transactions, typeFilter]);
+
   const currentMonthTransactions = useMemo(() => {
-    return transactions.filter(t => {
+    return filteredTransactions.filter(t => {
       const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
       return dt >= monthStart && dt < nextMonthStart;
     });
-  }, [transactions, monthStart, nextMonthStart]);
+  }, [filteredTransactions, monthStart, nextMonthStart]);
 
   const dailySections = useMemo(() => {
     const map = new Map();
@@ -979,8 +1039,6 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         </View>
       </View>
 
-      
-
       {/* Tabs */}
       <View style={styles.tabContainer}>
         {tabs.map((tab) => (
@@ -996,56 +1054,61 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         ))}
       </View>
 
-      {/* SMS Imported Banner */}
-      {importedFromSMS > 0 && (
-        <View style={{ backgroundColor: '#E6FFFA', padding: 8 }}>
-          <Text style={{ color: '#008080', textAlign: 'center' }}>
-            {importedFromSMS} transaction{importedFromSMS > 1 ? 's' : ''} imported from SMS
-          </Text>
-        </View>
-      )}
-      <View style={styles.smsInfo}>
-        <Text style={styles.smsLabel}>
-          Paste you bank transaction SMS below to import transactions
-          </Text>
-      </View>
-
-      {/* SMS INPUT + BUTTON (INLINE) */}
-      <View style={styles.smsRow}>
-        <TextInput
-          style={styles.smsInputInline}
-          placeholder="Paste SMS here"
-          value={smsText}
-          onChangeText={setSmsText}
-          multiline={false}
-        />
-        <TouchableOpacity style={styles.smsInlineBtn} onPress={handleManualSmsImport}>
-          <Text style={styles.smsBtnText}>Import SMS</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Summary inline */}
+      {/* Summary inline (clickable) */}
       <View style={styles.summaryInline}>
-        <View style={styles.summaryInlineItem}>
+        <TouchableOpacity
+          style={styles.summaryInlineItem}
+          onPress={() => setTypeFilter('income')}
+          activeOpacity={0.8}
+        >
           <Text style={styles.summaryInlineLabel}>Income</Text>
-          <Text style={[styles.summaryInlineValue, { color: '#007AFF' }]}>
+          <Text
+            style={[
+              styles.summaryInlineValue,
+              { color: '#007AFF' },
+              typeFilter === 'income' && { textDecorationLine: 'underline' },
+            ]}
+          >
             {income.toFixed(2)}
           </Text>
-        </View>
+        </TouchableOpacity>
+
         <View style={styles.summaryInlineDivider} />
-        <View style={styles.summaryInlineItem}>
+
+        <TouchableOpacity
+          style={styles.summaryInlineItem}
+          onPress={() => setTypeFilter('expense')}
+          activeOpacity={0.8}
+        >
           <Text style={styles.summaryInlineLabel}>Expense</Text>
-          <Text style={[styles.summaryInlineValue, { color: '#FF3B30' }]}>
+          <Text
+            style={[
+              styles.summaryInlineValue,
+              { color: '#FF3B30' },
+              typeFilter === 'expense' && { textDecorationLine: 'underline' },
+            ]}
+          >
             {expenses.toFixed(2)}
           </Text>
-        </View>
+        </TouchableOpacity>
+
         <View style={styles.summaryInlineDivider} />
-        <View style={styles.summaryInlineItem}>
+
+        <TouchableOpacity
+          style={styles.summaryInlineItem}
+          onPress={() => setTypeFilter('all')}
+          activeOpacity={0.8}
+        >
           <Text style={styles.summaryInlineLabel}>Total</Text>
-          <Text style={styles.summaryInlineValue}>
+          <Text
+            style={[
+              styles.summaryInlineValue,
+              typeFilter === 'all' && { textDecorationLine: 'underline' },
+            ]}
+          >
             {(income - expenses).toFixed(2)}
           </Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
@@ -1229,6 +1292,8 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   );
 }
 
+
+
 /* --------------------------------- styles --------------------------------- */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
@@ -1267,47 +1332,54 @@ const styles = StyleSheet.create({
   activeTab: { borderBottomWidth: 2, borderBottomColor: 'white' },
   tabText: { color: '#D3D3D3', fontSize: 12, fontWeight: '500' },
   activeTabText: { color: 'white' },
-  smsInfo:{
+  
+  
+  
+ 
+
+  // Update existing summary styles
+  summaryInline: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'white',
-    paddingHorizontal: 20,
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#FFFFFF',
-  },
-  smsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  smsInputInline: {
-    flex: 1,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    height: 40,
-    paddingHorizontal: 10,
-    marginRight: 8,
-  },
-  smsInlineBtn: {
-    paddingHorizontal: 12,
-    height: 40,
-    backgroundColor: '#F87171',
-    borderRadius: 8,
-    justifyContent: 'center',
-  },
-  smsBtnText: {
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: '600',
-    fontSize: 12,
+    borderColor: '#F3F4F6',
   },
 
+  summaryInlineItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+
+  summaryInlineDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: '#E5E7EB',
+  },
+
+  summaryInlineLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+
+  summaryInlineValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
   summaryInline: {
     flexDirection: 'row',
     alignItems: 'center',
