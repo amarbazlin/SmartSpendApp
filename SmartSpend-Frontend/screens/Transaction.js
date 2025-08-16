@@ -18,14 +18,26 @@ import {
   Camera,
   Edit3,
   X,
+  Plus,
+  Trash2,
 } from 'lucide-react-native';
 import { supabase } from '../services/supabase';
 
-// Local date yyyy-mm-dd
+/* ----------------------- date helpers ----------------------- */
 const ymdLocal = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
   ).padStart(2, '0')}`;
+const monthStartISO = () => {
+  const firstDay = new Date();
+  firstDay.setDate(1);
+  return firstDay.toISOString().slice(0, 10);
+};
+
+/* --------------------- constants --------------------- */
+const DEFAULT_INCOME_ICON = '💼';
+const DEFAULT_EXPENSE_ICON = '📝';
+const DEFAULT_COLOR = '#E8E8E8';
 
 const TransactionForm = ({
   visible,
@@ -36,9 +48,6 @@ const TransactionForm = ({
   mode = 'add',
   editTransaction,
   onUpdate,
-
-  // NEW: remaining balance you want to protect (e.g., monthly total = income - expenses)
-  // Pass this from Home screen. If not provided, no blocking will occur.
   availableThisMonth = Number.POSITIVE_INFINITY,
 }) => {
   const [selectedTab, setSelectedTab] = useState(transactionType);
@@ -51,29 +60,71 @@ const TransactionForm = ({
     })
   );
 
+  const [userId, setUserId] = useState(null);
+
+  // pickers / categories
   const [categories, setCategories] = useState({ income: [], expense: [] });
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
-
-  const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
+
+  // budget limits map (expense categories only)
+  const [limitByCategoryId, setLimitByCategoryId] = useState({});
+
+  // registration-chosen expense names (for filtering)
+  const [regChosenExpenseNames, setRegChosenExpenseNames] = useState(null);
+
+  // form fields
+  const [amount, setAmount] = useState('');
   const [account, setAccount] = useState('Cash');
   const [note, setNote] = useState('');
   const [description, setDescription] = useState('');
 
+  // pickers visibility
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
 
+  // income category add modal
+  const [showAddIncomeModal, setShowAddIncomeModal] = useState(false);
+  const [newIncomeName, setNewIncomeName] = useState('');
+  const [newIncomeEmoji, setNewIncomeEmoji] = useState('');
+
+  // income edit mode for delete UI
+  const [editIncomeMode, setEditIncomeMode] = useState(false);
+
   const [accounts, setAccounts] = useState([
     { name: 'Cash', emoji: '💵' },
-    { name: 'Transport', emoji: '🚌' },
     { name: 'Bank', emoji: '🏦' },
-    { name: 'Card', emoji: '💳' },
   ]);
 
+  /* --------------------- load data --------------------- */
   useEffect(() => {
     (async () => {
-      await loadCategoriesFromSupabase();
-      await loadAccountsFromSupabase();
+      try {
+        const { data: userResp, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userResp?.user) return;
+        const uid = userResp.user.id;
+        setUserId(uid);
+
+        // get registration-chosen categories to filter expense picker
+        const { data: userRow, error: uErr } = await supabase
+          .from('users')
+          .select('spending_categories')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!uErr && userRow?.spending_categories && Array.isArray(userRow.spending_categories)) {
+          setRegChosenExpenseNames(
+            new Set(userRow.spending_categories.map((n) => String(n).trim().toLowerCase()))
+          );
+        } else {
+          setRegChosenExpenseNames(null);
+        }
+
+        await ensureDefaultSalary(uid);
+        await loadCategoriesFromSupabase(uid);
+        await loadAccountsFromSupabase();
+      } catch (e) {
+        console.error('init load error:', e);
+      }
     })();
   }, []);
 
@@ -82,52 +133,89 @@ const TransactionForm = ({
       setSelectedTab(editTransaction.type || 'expense');
       setAmount(String(editTransaction.amount || ''));
       setCategory(editTransaction.category || '');
-      setAccount(
-        editTransaction.payment_method || editTransaction.account || 'Cash'
-      );
+      setAccount(editTransaction.payment_method || editTransaction.account || 'Cash');
       setNote(editTransaction.note || '');
       setDescription(editTransaction.description || '');
 
       const allCategories = [...categories.income, ...categories.expense];
       const found = allCategories.find((c) => c.name === editTransaction.category);
       if (found) setSelectedCategoryId(found.id);
+      else setSelectedCategoryId(editTransaction.category_id || null);
     }
   }, [mode, editTransaction, categories]);
 
-  const loadCategoriesFromSupabase = async () => {
+  /* ---------------- ensure "Salary" exists ---------------- */
+  const ensureDefaultSalary = async (uid) => {
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-      if (userErr || !user) return;
+      const { data: have, error: qErr } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('user_id', uid)
+        .eq('type', 'income')
+        .eq('name', 'Salary')
+        .maybeSingle();
+      if (qErr) throw qErr;
+      if (!have) {
+        const { error: insErr } = await supabase.from('categories').insert([
+          {
+            user_id: uid,
+            type: 'income',
+            name: 'Salary',
+            icon: DEFAULT_INCOME_ICON,
+            color: DEFAULT_COLOR,
+            limit_: 0,
+          },
+        ]);
+        if (insErr) console.log('ensureDefaultSalary insert warn:', insErr.message);
+      }
+    } catch (e) {
+      console.log('ensureDefaultSalary error:', e?.message);
+    }
+  };
 
+  /* --------------------- load categories --------------------- */
+  const loadCategoriesFromSupabase = async (uid) => {
+    try {
       const { data, error } = await supabase
         .from('categories')
-        .select('id, name, icon, type, user_id')
-        .or(`user_id.is.null,user_id.eq.${user.id}`);
-
+        .select('id, name, icon, type, user_id, limit_')
+        .eq('user_id', uid);
       if (error) throw error;
 
-      const incomeCategories = data
-        .filter((c) => c.type === 'income')
-        .map((c) => ({ id: c.id, name: c.name, emoji: c.icon || '📝' }));
+      const incomeRows = (data || []).filter((c) => c.type === 'income');
+      const incomeCategories = incomeRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        emoji: c.icon || DEFAULT_INCOME_ICON,
+      }));
 
-      const expenseCategories = data
-        .filter((c) => c.type === 'expense' || c.type == null)
-        .map((c) => ({ id: c.id, name: c.name, emoji: c.icon || '📝' }));
+      let expenseRows = (data || []).filter((c) => c.type === 'expense');
+      if (regChosenExpenseNames && regChosenExpenseNames.size > 0) {
+        expenseRows = expenseRows.filter((c) =>
+          regChosenExpenseNames.has(String(c.name).trim().toLowerCase())
+        );
+      }
+      const expenseCategories = expenseRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        emoji: c.icon || DEFAULT_EXPENSE_ICON,
+      }));
 
+      const limitsMap = {};
+      for (const r of expenseRows) limitsMap[r.id] = Number(r.limit_ || 0);
+
+      setLimitByCategoryId(limitsMap);
       setCategories({ income: incomeCategories, expense: expenseCategories });
     } catch (e) {
       console.error('loadCategoriesFromSupabase error:', e);
     }
   };
 
+  /* --------------------- load accounts --------------------- */
   const loadAccountsFromSupabase = async () => {
     try {
       const { data, error } = await supabase.from('accounts').select('*');
       if (error) throw error;
-
       if (data?.length) {
         setAccounts(
           data.map((acc) => ({
@@ -141,23 +229,8 @@ const TransactionForm = ({
     }
   };
 
-  const handleBackPress = () => {
-    resetForm();
-    onClose?.();
-    onBack?.();
-  };
-
-  const resetForm = () => {
-    setAmount('');
-    setCategory('');
-    setAccount('Cash');
-    setNote('');
-    setDescription('');
-    setSelectedTab('expense');
-    setSelectedCategoryId(null);
-  };
-
-  const validateForm = () => {
+  /* --------------------- validators --------------------- */
+  const validateFormBasics = () => {
     if (!amount || amount.trim() === '') {
       Alert.alert('Error', 'Please enter an amount');
       return false;
@@ -177,29 +250,97 @@ const TransactionForm = ({
     return true;
   };
 
-  // PURE submit – no DB writes here
-  const handleSubmit = () => {
-    if (!validateForm()) return;
+  const sumThisMonthForCategory = async (uid, categoryId, excludeExpenseId = null) => {
+    const firstDayStr = monthStartISO();
+
+    let { data: rows, error } = await supabase
+      .from('expenses')
+      .select('id, amount, date, created_at, category_id')
+      .eq('user_id', uid)
+      .eq('category_id', categoryId)
+      .gte('date', firstDayStr);
+    if (error) throw error;
+
+    if (!rows || rows.length === 0) {
+      const { data: rows2, error: e2 } = await supabase
+        .from('expenses')
+        .select('id, amount, created_at, category_id')
+        .eq('user_id', uid)
+        .eq('category_id', categoryId)
+        .gte('created_at', firstDayStr);
+      if (e2) throw e2;
+      rows = rows2 || [];
+    }
+
+    return (rows || []).reduce((s, r) => {
+      if (excludeExpenseId && r.id === excludeExpenseId) return s;
+      return s + Number(r.amount || 0);
+    }, 0);
+  };
+
+  /* --------------------- submit --------------------- */
+  const resetForm = () => {
+    setAmount('');
+    setCategory('');
+    setAccount('Cash');
+    setNote('');
+    setDescription('');
+    setSelectedTab('expense');
+    setSelectedCategoryId(null);
+  };
+
+  const handleBackPress = () => {
+    resetForm();
+    onClose?.();
+    onBack?.();
+  };
+
+  const handleSubmit = async () => {
+    if (!validateFormBasics()) return;
 
     const amt = parseFloat(amount);
+    const isExpense = selectedTab === 'expense';
 
-    // NEW: Block expenses that would make total negative
-    if (selectedTab === 'expense') {
-      // If editing an expense, user can reuse the original amount without being blocked.
+    // overall headroom
+    if (isExpense) {
       const originalExpenseAmount =
         mode === 'edit' && editTransaction?.type === 'expense'
           ? Number(editTransaction.amount || 0)
           : 0;
+      const allowedOverall =
+        (isFinite(availableThisMonth) ? availableThisMonth : Number.POSITIVE_INFINITY) +
+        originalExpenseAmount;
 
-      // Allowed headroom = remaining + original (when editing)
-      const allowed = (isFinite(availableThisMonth) ? availableThisMonth : Number.POSITIVE_INFINITY) + originalExpenseAmount;
-
-      if (amt > allowed) {
+      if (amt > allowedOverall) {
         Alert.alert(
           'Not allowed',
-          `This expense exceeds your available total.\nAvailable: ${allowed.toFixed(2)}`
+          `This expense exceeds your available total.\nAvailable: ${allowedOverall.toFixed(2)}`
         );
         return;
+      }
+    }
+
+    // category budget guard
+    if (isExpense && userId && selectedCategoryId) {
+      try {
+        const limit = Number(limitByCategoryId[selectedCategoryId] || 0);
+        if (limit > 0) {
+          const excludeId = mode === 'edit' && editTransaction?.id ? editTransaction.id : null;
+          const spentThisMonth = await sumThisMonthForCategory(userId, selectedCategoryId, excludeId);
+          const remaining = Math.max(0, limit - spentThisMonth);
+          if (amt > remaining) {
+            Alert.alert(
+              'Over category budget',
+              `This will exceed your "${category}" budget for this month.\n\n` +
+                `Budget: ${limit.toFixed(2)}\n` +
+                `Spent: ${spentThisMonth.toFixed(2)}\n` +
+                `Remaining: ${remaining.toFixed(2)}`
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        console.log('Category limit check failed (non-blocking):', e?.message);
       }
     }
 
@@ -214,16 +355,123 @@ const TransactionForm = ({
       description,
     };
 
-    if (mode === 'edit') {
-      onUpdate?.(payload);
-    } else {
-      onTransactionComplete?.(payload);
-    }
+    if (mode === 'edit') onUpdate?.(payload);
+    else onTransactionComplete?.(payload);
 
     resetForm();
     onClose?.();
   };
 
+  /* --------------------- add / delete income category --------------------- */
+  const openAddIncome = () => {
+    if (selectedTab !== 'income') return;
+    setNewIncomeName('');
+    setNewIncomeEmoji('');
+    setShowAddIncomeModal(true);
+  };
+
+  const handleAddIncomeCategory = async () => {
+    try {
+      const name = (newIncomeName || '').trim();
+      if (!name) {
+        Alert.alert('Required', 'Please enter a category name');
+        return;
+      }
+      // 🚫 disallow numbers in the name
+      if (/\d/.test(name)) {
+        Alert.alert('Invalid', 'Category name cannot contain numbers.');
+        return;
+      }
+
+      if (!userId) return;
+
+      // duplicate check for this user
+      const { data: exist, error: exErr } = await supabase
+        .from('categories')
+        .select('id, name')
+        .eq('user_id', userId)
+        .eq('type', 'income');
+      if (exErr) throw exErr;
+      const exists = (exist || []).some(
+        (r) => String(r.name).trim().toLowerCase() === name.toLowerCase()
+      );
+      if (exists) {
+        Alert.alert('Duplicate', `"${name}" already exists in your income categories.`);
+        return;
+      }
+
+      const icon = (newIncomeEmoji || DEFAULT_INCOME_ICON).trim() || DEFAULT_INCOME_ICON;
+
+      const { error: insErr } = await supabase.from('categories').insert([
+        { user_id: userId, type: 'income', name, icon, color: DEFAULT_COLOR, limit_: 0 },
+      ]);
+      if (insErr) throw insErr;
+
+      setShowAddIncomeModal(false);
+      await loadCategoriesFromSupabase(userId);
+      setCategory(name);
+      const justAdded = (categories.income || []).find((c) => c.name === name);
+      setSelectedCategoryId(justAdded?.id || null);
+    } catch (e) {
+      console.log('handleAddIncomeCategory error:', e?.message);
+      Alert.alert('Failed', e?.message || 'Could not add income category.');
+    }
+  };
+
+  const handleDeleteIncomeCategory = async (cat) => {
+    try {
+      if (!userId) return;
+
+      if (cat.name === 'Salary') {
+        Alert.alert('Not allowed', 'The default "Salary" category cannot be deleted.');
+        return;
+      }
+
+      // block delete if used in income rows
+      const { data: used, error: usedErr } = await supabase
+        .from('income')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('source', cat.name)
+        .limit(1);
+      if (usedErr) throw usedErr;
+      if (used && used.length > 0) {
+        Alert.alert(
+          'In use',
+          `You have income transactions under "${cat.name}". Delete or change those first.`
+        );
+        return;
+      }
+
+      Alert.alert('Delete category?', `Remove "${cat.name}" from your income categories?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error: delErr } = await supabase
+              .from('categories')
+              .delete()
+              .eq('id', cat.id)
+              .eq('user_id', userId)
+              .eq('type', 'income');
+            if (delErr) throw delErr;
+
+            if (selectedCategoryId === cat.id) {
+              setSelectedCategoryId(null);
+              setCategory('');
+            }
+            await loadCategoriesFromSupabase(userId);
+          },
+        },
+      ]);
+    } catch (e) {
+      console.log('handleDeleteIncomeCategory error:', e?.message);
+      Alert.alert('Failed', e?.message || 'Could not delete category.');
+    }
+  };
+
+  /* --------------------- UI helpers --------------------- */
   const getTabStyle = (tabType) => {
     if (tabType === selectedTab) {
       return tabType === 'income'
@@ -251,7 +499,7 @@ const TransactionForm = ({
   const getCategoryEmoji = (categoryName) => {
     const all = [...categories.income, ...categories.expense];
     const cat = all.find((c) => c.name === categoryName);
-    return cat ? cat.emoji : '📝';
+    return cat ? cat.emoji : DEFAULT_EXPENSE_ICON;
   };
 
   const getAccountEmoji = (accountName) => {
@@ -259,24 +507,36 @@ const TransactionForm = ({
     return acc ? acc.emoji : '💳';
   };
 
+  /* --------------------- pickers --------------------- */
   const renderCategoryPicker = () => (
     <Modal
       visible={showCategoryPicker}
       transparent
       animationType="slide"
-      onRequestClose={() => setShowCategoryPicker(false)}
+      onRequestClose={() => {
+        setEditIncomeMode(false);
+        setShowCategoryPicker(false);
+      }}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Category</Text>
             <View style={styles.modalHeaderButtons}>
-              <TouchableOpacity style={styles.modalHeaderButton}>
-                <Edit3 size={20} color="#9CA3AF" />
-              </TouchableOpacity>
+              {selectedTab === 'income' && (
+                <TouchableOpacity
+                  style={styles.modalHeaderButton}
+                  onPress={() => setEditIncomeMode((v) => !v)}
+                >
+                  <Edit3 size={20} color="#111827" />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={styles.modalHeaderButton}
-                onPress={() => setShowCategoryPicker(false)}
+                onPress={() => {
+                  setEditIncomeMode(false);
+                  setShowCategoryPicker(false);
+                }}
               >
                 <X size={20} color="#9CA3AF" />
               </TouchableOpacity>
@@ -285,25 +545,113 @@ const TransactionForm = ({
 
           <ScrollView style={styles.pickerScrollView}>
             <View style={styles.pickerGrid}>
-              {categories[selectedTab].map((cat) => (
+              {(selectedTab === 'income' ? categories.income : categories.expense).map((cat) => (
                 <View key={cat.id} style={styles.pickerGridItem}>
-                  <TouchableOpacity
-                    style={styles.pickerItemButton}
-                    onPress={() => {
-                      setCategory(cat.name);
-                      setSelectedCategoryId(cat.id);
-                      setShowCategoryPicker(false);
-                    }}
-                  >
-                    <Text style={styles.pickerItemEmoji}>{cat.emoji}</Text>
-                    <Text style={styles.pickerItemText}>{cat.name}</Text>
-                  </TouchableOpacity>
+                  <View style={{ position: 'relative', alignItems: 'center' }}>
+                    {selectedTab === 'income' && editIncomeMode && cat.name !== 'Salary' && (
+                      <TouchableOpacity
+                        style={styles.deleteBadge}
+                        onPress={() => handleDeleteIncomeCategory(cat)}
+                      >
+                        <Trash2 size={14} color="#fff" />
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.pickerItemButton}
+                      disabled={selectedTab === 'income' && editIncomeMode}
+                      onPress={() => {
+                        setCategory(cat.name);
+                        setSelectedCategoryId(cat.id);
+                        setEditIncomeMode(false);
+                        setShowCategoryPicker(false);
+                      }}
+                    >
+                      <Text style={styles.pickerItemEmoji}>{cat.emoji}</Text>
+                      <Text style={styles.pickerItemText}>{cat.name}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))}
             </View>
           </ScrollView>
+
+          {/* Income add button only on Income tab (bottom-right) */}
+          {selectedTab === 'income' && !editIncomeMode && (
+            <View style={{ padding: 16 }}>
+              <TouchableOpacity
+                onPress={openAddIncome}
+                style={{
+                  alignSelf: 'flex-end',
+                  backgroundColor: '#008080',
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Plus size={18} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Add category</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
+
+      {/* Add Income Category Modal */}
+      <Modal
+        visible={showAddIncomeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAddIncomeModal(false)}
+      >
+        <View style={styles.addOverlay}>
+          <View style={styles.addCard}>
+            <Text style={styles.addTitle}>Add income category</Text>
+
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.addLabel}>Name *</Text>
+              <TextInput
+                style={styles.addInput}
+                placeholder="e.g., Freelance, Business, Bonus"
+                placeholderTextColor="#9CA3AF"
+                value={newIncomeName}
+                onChangeText={setNewIncomeName}
+              />
+            </View>
+
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.addLabel}>Emoji (optional)</Text>
+              <TextInput
+                style={styles.addInput}
+                placeholder="e.g., 💼 💸 🪙"
+                placeholderTextColor="#9CA3AF"
+                value={newIncomeEmoji}
+                onChangeText={setNewIncomeEmoji}
+                maxLength={4}
+              />
+            </View>
+
+            <View style={styles.addButtonsRow}>
+              <TouchableOpacity
+                style={[styles.addBtn, styles.addCancel]}
+                onPress={() => setShowAddIncomeModal(false)}
+              >
+                <Text style={styles.addBtnTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.addBtn, styles.addSave]}
+                onPress={handleAddIncomeCategory}
+              >
+                <Plus size={18} color="#fff" />
+                <Text style={styles.addBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 
@@ -319,9 +667,6 @@ const TransactionForm = ({
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Account</Text>
             <View style={styles.modalHeaderButtons}>
-              <TouchableOpacity style={styles.modalHeaderButton}>
-                <Edit3 size={20} color="#9CA3AF" />
-              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.modalHeaderButton}
                 onPress={() => setShowAccountPicker(false)}
@@ -354,6 +699,7 @@ const TransactionForm = ({
     </Modal>
   );
 
+  /* --------------------- render --------------------- */
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleBackPress}>
       <SafeAreaView style={styles.container}>
@@ -423,10 +769,8 @@ const TransactionForm = ({
               >
                 <View style={styles.inputWithIcon}>
                   <Text style={styles.inputEmoji}>{getCategoryEmoji(category)}</Text>
-                  <Text
-                    style={category ? styles.inputText : styles.placeholderText}
-                  >
-                    {category || 'Select category'}
+                  <Text style={category ? styles.inputText : styles.placeholderText}>
+                    {category || (selectedTab === 'income' ? 'Select income category' : 'Select category')}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -495,6 +839,12 @@ const TransactionForm = ({
   );
 };
 
+
+
+
+
+
+/* --------------------- styles --------------------- */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F3F4F6' },
   header: {
@@ -508,7 +858,7 @@ const styles = StyleSheet.create({
   backButton: { padding: 8 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: '600', marginLeft: 16 },
   content: { flex: 1 },
-  tabContainer: { flexDirection: 'row', margin: 16 },
+  tabContainer: { flexDirection: 'row', margin: 16, gap: 10 },
   tab: {
     flex: 1,
     paddingVertical: 12,
@@ -516,6 +866,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
   },
+  deleteBadge: {
+  position: 'absolute',
+  top: -6,
+  right: -6,
+  zIndex: 2,
+  backgroundColor: '#EF4444',
+  borderRadius: 10,
+  padding: 4,
+  elevation: 2,
+  shadowColor: '#000',
+  shadowOpacity: 0.15,
+  shadowRadius: 4,
+},
+
   activeTab: { borderWidth: 2 },
   inactiveTab: { backgroundColor: '#E5E7EB', borderColor: '#E5E7EB' },
   incomeTab: { backgroundColor: 'white', borderColor: '#008080' },
@@ -525,9 +889,11 @@ const styles = StyleSheet.create({
   inactiveTabText: { color: '#6B7280' },
   incomeTabText: { color: '#008080' },
   expenseTabText: { color: '#EF4444' },
+
   formContainer: { paddingHorizontal: 16 },
   fieldContainer: { marginBottom: 24 },
   fieldLabel: { fontSize: 16, fontWeight: '500', color: '#6B7280', marginBottom: 8 },
+
   dateContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -539,6 +905,7 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 16, color: '#1F2937', fontWeight: '500' },
   repeatButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   repeatText: { fontSize: 14, color: '#9CA3AF' },
+
   textInput: {
     paddingVertical: 12,
     fontSize: 16,
@@ -546,6 +913,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
+
   selectInputWithIcon: {
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -555,11 +923,14 @@ const styles = StyleSheet.create({
   inputEmoji: { fontSize: 20 },
   inputText: { fontSize: 16, color: '#1F2937' },
   placeholderText: { fontSize: 16, color: '#9CA3AF' },
+
   noteContainer: { flexDirection: 'row', alignItems: 'center' },
   infoButton: { padding: 4 },
+
   descriptionContainer: { flexDirection: 'row', alignItems: 'flex-end' },
   descriptionInput: { minHeight: 40, textAlignVertical: 'top' },
   cameraButton: { padding: 4, marginLeft: 8 },
+
   buttonContainer: {
     paddingHorizontal: 16,
     paddingVertical: 20,
@@ -573,6 +944,8 @@ const styles = StyleSheet.create({
   incomeSaveButton: { backgroundColor: '#008080' },
   expenseSaveButton: { backgroundColor: '#EF4444' },
   continueButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+
+  /* bottom sheets */
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -580,7 +953,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#F9FAFB',
-    height: '50%',
+    height: '55%',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
   },
@@ -594,7 +967,8 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937' },
   modalHeaderButtons: { flexDirection: 'row', gap: 16 },
-  modalHeaderButton: { padding: 4 },
+  modalHeaderButton: { padding: 6 },
+
   pickerScrollView: { flex: 1 },
   pickerGrid: {
     flexDirection: 'row',
@@ -607,6 +981,54 @@ const styles = StyleSheet.create({
   pickerItemButton: { alignItems: 'center' },
   pickerItemEmoji: { fontSize: 24, marginBottom: 4 },
   pickerItemText: { fontSize: 12, textAlign: 'center', color: '#1F2937' },
+
+  /* add income modal */
+  addOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addCard: {
+    width: '88%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  addTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  addLabel: { fontSize: 13, color: '#6B7280', marginBottom: 6 },
+  addInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#111827',
+    backgroundColor: '#fff',
+  },
+  addButtonsRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  addCancel: { backgroundColor: '#F3F4F6' },
+  addSave: { backgroundColor: '#008080' },
+  addBtnText: { color: '#fff', fontWeight: '700' },
+  addBtnTextSecondary: { color: '#111827', fontWeight: '600' },
 });
 
 export default TransactionForm;

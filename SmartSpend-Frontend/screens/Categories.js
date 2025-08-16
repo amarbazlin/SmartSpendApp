@@ -43,15 +43,12 @@ const validateBudgetTotals = (categories, income) => {
 const guessRole = (name = '') => {
   const n = name.toLowerCase();
   if (n === 'buffer' || n === 'emergency' || n === 'rainy day') return 'buffer';
-  if (
-    ['rent', 'housing', 'utilities', 'food', 'transport', 'healthcare', 'medicine'].some((k) =>
-      n.includes(k)
-    )
-  ) {
+  if (n.includes('shop') || n.includes('gift') || n.includes('hobby')) return 'flex';
+  if (['rent','housing','utilities','food','transport','healthcare','medicine'].some(k => n.includes(k)))
     return 'critical';
-  }
   return 'flex';
 };
+
 
 // Make sure user has a Buffer category (no “role” column needed)
 async function ensureBufferExists(uid) {
@@ -70,7 +67,7 @@ async function ensureBufferExists(uid) {
         icon: '🧰',
         color: '#E0E7FF',
         type: 'expense',
-        limit_: 0,
+       
       },
     ]);
   }
@@ -414,6 +411,11 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
     () => ['#E8E8E8', '#A8C8EC', '#F4E4A6', '#F8BBD9', '#C7D2FE', '#A7F3D0', '#FEF3C7', '#FECACA', '#D1FAE5', '#DBEAFE', '#E0E7FF', '#FCE7F3'],
     []
   );
+  const DEFAULT_COLORS = {
+  critical: '#DBEAFE', // light blue
+  flex: '#FEF3C7',     // light yellow
+  buffer: '#FECACA',   // light red
+};
 
   /* Load user + data */
   useEffect(() => {
@@ -744,12 +746,12 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
 
         <Section
           title="Essentials (Must‑haves)"
-          hint="Bills and basics you can’t skip — e.g., food, utilities, transport, healthcare."
+          hint="Bills and basics you can’t skip."
           items={buckets.critical}
         />
         <Section
-          title="Flexible Spending (Nice‑to‑haves)"
-          hint="Optional items you can adjust — e.g., entertainment, shopping, hobbies."
+          title="Flexible Spending (Wants)"
+          hint="Optional items you can adjust."
           items={buckets.flex}
         />
         <Section
@@ -807,9 +809,15 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
       const formatted = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : numeric;
       setEditedLimit(formatted);
     };
+    const role = guessRole(category.name);
+    const cardColor = category.color && category.color !== '#E8E8E8'
+      ? category.color
+      : DEFAULT_COLORS[role] || '#FFFFFF';
+    
 
     return (
-      <View style={[styles.categoryCard, { backgroundColor: category.color }]}>
+      
+      <View style={[styles.categoryCard, { backgroundColor: cardColor }]}>
         <View style={styles.categoryContent}>
           <View style={styles.categoryIconContainer}>
             <Text style={styles.categoryIcon}>{category.icon}</Text>
@@ -879,8 +887,8 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
             Over by Rs. {money(totals.total - userIncome)}. Lower your limits to fit your income.
           </Text>
         ) : (
-          <Text style={{ color: '#065f46' }}>
-            Left to assign: Rs. {money(totals.leftover)} (Total {money(totals.total)} / Income {money(userIncome)})
+          <Text style={{ color: '#065f46', fontSize: 16 }}>
+            Left to assign: Rs. {money(totals.leftover)} 
           </Text>
         )}
       </View>
@@ -896,11 +904,11 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
             {isLoadingRecommendation ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.aiButtonText}>🤖 Generate Budget Plan</Text>
+              <Text style={styles.aiButtonText}> View Smart Plan</Text>
             )}
           </TouchableOpacity>
           <Text style={styles.aiButtonHint}>
-            Creates a plan using your income and recent spending. You can change numbers anytime.
+            Creates a personalized budgeting plan based on your income and age. Clicking will reset your custom edits back to the smart plan.
           </Text>
 
           {/* Friendlier AI Summary */}
@@ -1141,13 +1149,13 @@ const styles = StyleSheet.create({
   aiButton: {
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: '#0A8AB8',
+    backgroundColor: '#5CAF56',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   aiButtonDisabled: {
-    backgroundColor: '#94a3b8',
+    backgroundColor: '#5CAF56',
   },
   aiButtonText: {
     color: '#FFFFFF',

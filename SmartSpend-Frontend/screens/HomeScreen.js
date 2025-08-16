@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import TransactionsScreenComponent from './TransactionScreen';
+import { getBudgetingIncome } from './fetchRecommendation';
+
 import {
   View,
   Text,
@@ -370,48 +372,52 @@ export default function HomeScreen({ onLogout }) {
   }, []);
 
   const fetchBalanceData = async () => {
-    try {
-      // Fetch all income transactions
-      const { data: incomeData, error: incomeError } = await supabase
-        .from('income')
-        .select('amount');
+  try {
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr || !user) return;
+    const uid = user.id;
 
-      if (incomeError) {
-        console.error('Error fetching income:', incomeError);
-        return;
-      }
+    // ✅ use the safe income (sum this month OR profile fallback)
+    const { income: monthlyIncome } = await getBudgetingIncome(uid);
 
-      // Fetch all expense transactions
-      const { data: expenseData, error: expenseError } = await supabase
+    // expenses for this month
+    const start = new Date(); start.setDate(1);
+    const startStr = start.toISOString().slice(0, 10);
+
+    const cols = 'amount, date, created_at';
+    let { data: expRows, error: expErr } = await supabase
+      .from('expenses')
+      .select(cols)
+      .eq('user_id', uid)
+      .gte('date', startStr);
+    if (expErr) throw expErr;
+
+    if (!expRows?.length) {
+      const { data: expRows2, error: expErr2 } = await supabase
         .from('expenses')
-        .select('amount');
-
-      if (expenseError) {
-        console.error('Error fetching expenses:', expenseError);
-        return;
-      }
-
-      // Calculate totals
-      const totalIncome =
-        incomeData?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
-      const totalExpense =
-        expenseData?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
-      const totalBalance = totalIncome - totalExpense;
-      const expensePercentage =
-        totalIncome > 0
-          ? Math.round((totalExpense / totalIncome) * 100)
-          : 0;
-
-      setBalanceData({
-        totalBalance,
-        totalExpense,
-        totalIncome,
-        expensePercentage,
-      });
-    } catch (error) {
-      console.error('Error calculating balance:', error);
+        .select(cols)
+        .eq('user_id', uid)
+        .gte('created_at', startStr);
+      if (expErr2) throw expErr2;
+      expRows = expRows2 || [];
     }
-  };
+
+    const totalExpense = expRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+    setBalanceData({
+      totalBalance: monthlyIncome - totalExpense,
+      totalExpense,
+      totalIncome: monthlyIncome, // shows 350,000 (not 700,000)
+      expensePercentage: monthlyIncome > 0 ? Math.round((totalExpense / monthlyIncome) * 100) : 0,
+    });
+  } catch (e) {
+    console.error('Error calculating monthly balance:', e);
+  }
+};
+
 
   // Navigation (kept as-is)
   const navigateToCategories = () => {

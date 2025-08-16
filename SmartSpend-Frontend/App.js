@@ -1,47 +1,70 @@
-// app.config.js
-export default ({ config }) => ({
-  name: "SmartSpendApp",            // display name (can be pretty)
-  slug: "smartspend",               // MUST match the existing EAS project slug (lowercase, no spaces)
-  version: "1.0.0",
-  owner: "bazlinamar",
+// App.js
+import React, { useEffect, useState } from 'react';
+import { View, Text, ActivityIndicator } from 'react-native';
+import 'react-native-gesture-handler';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
 
-  icon: "./screens/images/App_Logo_imresizer.png",
-  orientation: "portrait",
-  platforms: ["ios", "android"],
-  userInterfaceStyle: "light",
-  assetBundlePatterns: ["**/*"],
+import HomeScreen from './screens/HomeScreen';
+import TransactionsScreen from './screens/TransactionScreen';
+import RegisterScreen from './screens/RegisterScreen'; // your Auth screen with register/login toggle
+import { supabase } from './services/supabase';
 
-  web: { output: "static", bundler: "metro" },
+const Stack = createStackNavigator();
 
-  plugins: [
-    [
-      "expo-build-properties",
-      {
-        android: {
-          compileSdkVersion: 34,
-          targetSdkVersion: 34,
-          buildToolsVersion: "34.0.0"
-        },
-        ios: {
-          deploymentTarget: "13.4"
-        }
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [bootLoading, setBootLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (mounted) {
+        setSession(session);
+        setBootLoading(false);
       }
-    ]
-  ],
+    };
 
-  ios: {
-    bundleIdentifier: "com.bazlinamar.smartspend", // valid reverse-DNS id
-    infoPlist: { ITSAppUsesNonExemptEncryption: false }
-  },
+    init();
 
-  android: {
-    package: "com.bazlinamar.smartspend"           // all lowercase
-  },
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        // This will fire after login/logout/register/refresh etc.
+        setSession(session);
+      }
+    );
 
-  extra: {
-    eas: { projectId: "45cbf1a9-fad6-4779-963b-1592e4a1e630" }, // keep this ID
-    apiUrl: process.env.API_URL || "https://0da41aa167cb.ngrok-free.app"
-  },
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
+  }, []);
 
-  runtimeVersion: { policy: "appVersion" }
-});
+  if (bootLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#00B8A9" />
+        <Text style={{ marginTop: 10, fontSize: 16 }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {session ? (
+          // Authenticated stack
+          <>
+            <Stack.Screen name="HomeScreen" component={HomeScreen} />
+            <Stack.Screen name="TransactionScreen" component={TransactionsScreen} />
+          </>
+        ) : (
+          // Auth stack
+          <Stack.Screen name="RegisterScreen" component={RegisterScreen} />
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
