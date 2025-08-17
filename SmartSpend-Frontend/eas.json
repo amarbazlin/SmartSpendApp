@@ -8,6 +8,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "android": { "buildType": "apk" },
       "env": { "API_URL": "https://0da41aa167cb.ngrok-free.app" }
     }
   },
