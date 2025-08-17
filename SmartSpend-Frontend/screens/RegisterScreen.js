@@ -28,7 +28,7 @@ const CORE = ['Healthcare', 'Food', 'Utilities', 'Transport'];
 // Other options (gray outline when unselected)
 const OPTIONAL_CATEGORIES = [
   'Housing', 'Education', 'Savings', 'Entertainment', 'Shopping',
-  'Clothing', 'Subscriptions', 'Dining Out', 'Personal Care',
+  'Clothing', 'Subscriptions', 'Personal Care',
   'Pets', 'Gifts', 'Insurance', 'Debt', 'Charity',
 ];
 
@@ -46,7 +46,6 @@ const ICONS = {
   Shopping: '🛍️',
   Clothing: '👗',
   Subscriptions: '📺',
-  'Dining Out': '🍽️',
   'Personal Care': '🧴',
   Pets: '🐾',
   Gifts: '🎁',

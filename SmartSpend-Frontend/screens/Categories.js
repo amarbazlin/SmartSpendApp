@@ -526,7 +526,7 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
       if (rec) {
         setRecommendation(rec);
         await fetchCategories(); // refresh cards with new limits
-        Alert.alert('AI Budget Applied', 'Limits updated based on your current income.');
+        //Alert.alert('AI Budget Applied', 'Limits updated based on your current income.');
       }
     } finally {
       setIsLoadingRecommendation(false);
@@ -675,8 +675,12 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   );
 
   const Header = () => (
+ 
     <View style={styles.header}>
+      
       <View style={styles.headerTop}>
+        
+      
         <TouchableOpacity style={styles.menuButton}>
           <Icon name="menu" size={24} color="#374151" />
         </TouchableOpacity>
@@ -698,6 +702,7 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
         </View>
       </View>
     </View>
+    
   );
 
   // AI recommendation display (friendlier, visual, explained terms)
@@ -872,8 +877,15 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   if (loading) return <LoadingSpinner />;
 
   return (
+  <View style={{ flex: 1, backgroundColor: '#008080' }}>
+    {/* Paint the notch / status area */}
+    <SafeAreaView style={{ backgroundColor: '#008080' }}>
+      <StatusBar barStyle="light-content" backgroundColor="#008080" />
+    </SafeAreaView>
+
+    {/* App content area */}
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
       <Header />
 
       {/* Budget totals banner (rounded) */}
@@ -908,7 +920,7 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
             )}
           </TouchableOpacity>
           <Text style={styles.aiButtonHint}>
-            Creates a personalized budgeting plan based on your income and age. Clicking will reset your custom edits back to the smart plan.
+            Creates a personalized budgeting plan based on your income and age. Clicking the above button will reset your custom edits back to the smart plan.
           </Text>
 
           {/* Friendlier AI Summary */}
@@ -998,8 +1010,9 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
         onConfirm={confirmDelete}
         categoryName={deletingCategory?.name}
       />
-    </SafeAreaView>
-  );
+        </SafeAreaView>
+  </View>
+);
 };
 
 /* ------------------------------------------------------------------ */

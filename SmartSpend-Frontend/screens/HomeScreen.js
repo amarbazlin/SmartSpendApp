@@ -741,9 +741,15 @@ export default function HomeScreen({ onLogout }) {
   /* ----------------------------------- HOME ---------------------------------- */
 
   return (
+   <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+    {/* Paint the status/notch area white on iOS and set bar icons dark */}
+    <SafeAreaView style={{ backgroundColor: '#FFFFFF' }}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" translucent={false} />
+    </SafeAreaView>
+
+    {/* Your actual screen content (can keep light grey here if you like) */}
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
         {/* Header */}
         <View style={styles.header}>
@@ -1027,8 +1033,9 @@ export default function HomeScreen({ onLogout }) {
         onClose={closeMoreMenu}
         onLogout={handleLogout}
       />
-    </SafeAreaView>
-  );
+       </SafeAreaView>
+  </View>
+);
 }
 
 const styles = StyleSheet.create({
