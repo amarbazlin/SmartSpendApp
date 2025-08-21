@@ -10,6 +10,17 @@ import TransactionsScreen from './screens/TransactionScreen';
 import RegisterScreen from './screens/RegisterScreen'; // your Auth screen with register/login toggle
 import { supabase } from './services/supabase';
 
+import { supabase } from './services/supabase';
+
+supabase.auth.getSession().then(({ data, error }) => {
+  if (error) {
+    console.error("Supabase connection error:", error.message);
+  } else {
+    console.log("Supabase connected, session data:", data);
+  }
+});
+
+
 const Stack = createStackNavigator();
 
 export default function App() {
