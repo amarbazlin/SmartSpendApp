@@ -1,55 +1,53 @@
 {
   "expo": {
-    "name": "SmartSpendApp",
+    "name": "SmartSpend",
     "slug": "smartspend",
-    "icon": "./screens/images/App_Logo_imresizer.png",
     "version": "1.0.0",
-    "sdkVersion": "51.0.0",
     "orientation": "portrait",
+    "icon": "./screens/images/App_Logo_imresizer.png",
+    "userInterfaceStyle": "light",
     "platforms": [
       "ios",
-      "android"
+      "android",
+      "web"
     ],
-    "userInterfaceStyle": "light",
     "assetBundlePatterns": [
       "**/*"
     ],
-    "web": {
-      "output": "static",
-      "bundler": "metro"
-    },
     "plugins": [
+      "expo-dev-client",
       [
         "expo-build-properties",
         {
           "android": {
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0",
-            "package": "com.amarbazlin.smartspend"
+            "buildToolsVersion": "34.0.0"
           },
           "ios": {
-            "deploymentTarget": "13.4",
-            "package": "com.amarbazlin.smartspend"
+            "deploymentTarget": "13.4"
           }
         }
       ]
     ],
-    "owner": "bazlinamar",
+    "android": {
+      "package": "com.amarbazlin.smartspend"
+    },
     "ios": {
-      "bundleIdentifier": "y",
+      "bundleIdentifier": "com.amarbazlin.smartspend",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
-    "android": {
-      "package": "com.bazlinamar.SmartSpend"
+    "web": {
+      "bundler": "metro",
+      "output": "static"
     },
     "extra": {
+      "apiUrl": "https://0da41aa167cb.ngrok-free.app",
       "eas": {
-        "projectId": "45cbf1a9-fad6-4779-963b-1592e4a1e630"
-      },
-      "apiUrl": "https://0da41aa167cb.ngrok-free.app"
+        "projectId": "241604e1-17cd-4dde-b919-c778a6dbc7a2"
+      }
     }
   }
 }
