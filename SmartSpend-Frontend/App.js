@@ -10,7 +10,7 @@ import TransactionsScreen from './screens/TransactionScreen';
 import RegisterScreen from './screens/RegisterScreen'; // your Auth screen with register/login toggle
 import { supabase } from './services/supabase';
 
-import { supabase } from './services/supabase';
+
 
 supabase.auth.getSession().then(({ data, error }) => {
   if (error) {

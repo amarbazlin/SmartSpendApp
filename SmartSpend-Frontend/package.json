@@ -40,14 +40,15 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-vector-icons": "^10.2.0",
     "react-native-web": "~0.19.13",
-    "victory-native": "^36.6.11"
+    "victory-native": "^36.6.11",
+    "expo-dev-client": "~4.0.29"
   },
   "devDependencies": {
     "@babel/core": "^7.23.0",
     "@babel/preset-typescript": "^7.27.1",
     "@expo/ngrok": "^4.1.0",
     "babel-preset-expo": "^11.0.15",
-    "eas-cli": "^16.17.3",
+    "eas-cli": "^16.17.4",
     "metro": "~0.80.8",
     "metro-config": "0.80.4",
     "metro-react-native-babel-transformer": "^0.77.0",
