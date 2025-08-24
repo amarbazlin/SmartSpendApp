@@ -1,4 +1,6 @@
-# Node modules
+# -------------------------
+# Frontend / Node / Expo
+# -------------------------
 node_modules/
 
 # Logs
@@ -7,12 +9,12 @@ logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# Metro, React Native, and bundler cache
+# Metro / Expo / bundler cache
 .expo/
 .expo-shared/
 .expo-dev-client/
-.vscode/
 *.expo
 metro-cache/
 .babelrc
@@ -20,12 +22,19 @@ babel.config.js
 babel.config.json
 babel-transform-cache/
 
-# Build artifacts
+# Editor
+.vscode/
+.idea/
+
+# Build artifacts (RN / Expo)
+android/
+ios/
 android/app/build/
 ios/Pods/
 ios/build/
 ios/DerivedData/
 build/
+dist/
 *.xcworkspace
 *.xcuserstate
 *.xcodeproj
@@ -33,48 +42,71 @@ build/
 *.mode1v3
 *.mode2v3
 
-# React Native specific
+# RN signing files
 *.keystore
 *.jks
 *.p12
 
-# Mac system files
-.DS_Store
-
-# Android/Gradle
-.gradle
-/local.properties
-*.iml
-.idea/
-
-# Xcode
-*.xcuserdata
-*.xcuserstate
-
 # Watchman
 .watchmanconfig
 
-# Environment files
+# Env files (frontend & backend)
 .env
 .env.*
+SmartSpend-Backend/.env
 
-# Coverage reports
-coverage/
+# Lock files (optional; keep only one if your team prefers)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# Testing
+# Tests / coverage
 jest/
 *.test.js
 *.spec.js
+coverage/
+.coverage
+htmlcov/
 
-# Misc
+# Misc temp
 *.swp
 *.swo
 *.orig
+*.tmp
 
 # Lint cache
 .eslintcache
 
-# Package lock files (optional: use only one)
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
+# -------------------------
+# Backend / Python (Flask)
+# -------------------------
+# Virtual envs
+.venv/
+venv/
+SmartSpend-Backend/.venv/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build / packaging
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Backend logs
+SmartSpend-Backend/*.log
+
+# (Optional) model artifacts — remove if you want to version them
+SmartSpend-Backend/*.joblib
+SmartSpend-Backend/*.pkl
+SmartSpend-Backend/models/*.joblib
+SmartSpend-Backend/models/*.pkl
