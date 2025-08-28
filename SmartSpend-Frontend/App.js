@@ -9,6 +9,7 @@ import HomeScreen from './screens/HomeScreen';
 import TransactionsScreen from './screens/TransactionScreen';
 import RegisterScreen from './screens/RegisterScreen'; // your Auth screen with register/login toggle
 import { supabase } from './services/supabase';
+import ChatbotScreen from './screens/ChatbotScreen';
 
 
 
@@ -70,6 +71,7 @@ export default function App() {
           <>
             <Stack.Screen name="HomeScreen" component={HomeScreen} />
             <Stack.Screen name="TransactionScreen" component={TransactionsScreen} />
+            <Stack.Screen name="Chatbot" component={ChatbotScreen} />
           </>
         ) : (
           // Auth stack
