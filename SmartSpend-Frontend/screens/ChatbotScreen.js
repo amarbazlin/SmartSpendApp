@@ -1,5 +1,6 @@
 // SmartSpend-Frontend/screens/ChatbotScreen.js
-import React, { useState, useRef, useEffect } from 'react';
+// Requires: npx expo install react-native-markdown-display
+import React, { useState, useRef, useEffect, Fragment } from 'react';
 import {
   View,
   Text,
@@ -10,9 +11,12 @@ import {
   Alert,
   StyleSheet,
   Image,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+import Markdown from 'react-native-markdown-display';
 import { askInvestAssistant } from '../services/chatApi';
 
 function lkr(n) {
@@ -45,6 +49,59 @@ function sanitizeReply(t = '') {
   return out;
 }
 
+/** Beautify to readable markdown: bullets, bold amounts, Step → headings + spacing */
+function beautifyMarkdown(t = '') {
+  let out = sanitizeReply(t).replace(/\r\n/g, '\n');
+
+  // Normalize bullets
+  out = out.replace(/^\s*•\s+/gm, '- ');
+
+  // Bold currency & percentages
+  out = out.replace(/\b(?:LKR|Rs\.?)\s?\d[\d,]*(?:\.\d+)?\b/gi, (m) => `**${m}**`);
+  out = out.replace(/\b\d{1,3}(?:\.\d+)?\s?%/g, (m) => `**${m}**`);
+
+  // Line-by-line transform so we can force blank lines around step headings
+  const lines = out.split('\n');
+  const outLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+
+    // Match "Step 1: Title" (with optional bold ** ** and trailing period)
+    const stepRx =
+      /^\s*\*{0,2}Step\s*(\d+)\s*[:\-]\s*(.+?)\*{0,2}\.?\s*$/i;
+    const m = line.match(stepRx);
+    if (m) {
+      const title = m[2].trim();
+      // Guarantee a blank line before and after
+      if (outLines.length && outLines[outLines.length - 1] !== '') outLines.push('');
+      outLines.push(`#### Step ${m[1]} — ${title}`);
+      outLines.push('');
+      continue;
+    }
+
+    outLines.push(line);
+  }
+  out = outLines.join('\n');
+
+  // Promote common sections to H3 with spacing
+  const sec = ['Summary', 'Overview', 'Plan', 'Next steps', 'Recommendations', 'Why this', 'Notes', 'Risks'];
+  out = out
+    .split('\n')
+    .map((line) => {
+      if (sec.some((k) => new RegExp(`^\\s*${k}\\b:?`, 'i').test(line))) {
+        const text = line.replace(/:\s*$/, '').trim();
+        return `\n\n### ${text}\n`;
+      }
+      return line;
+    })
+    .join('\n');
+
+  // Collapse excess spacing but keep nice gaps
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+
+  return out;
+}
+
 export default function ChatbotScreen() {
   const navigation = useNavigation();
   const listRef = useRef(null);
@@ -53,22 +110,22 @@ export default function ChatbotScreen() {
     {
       role: 'assistant',
       content:
-        'Hi! I’m your SmartSpend coach. Ask about saving, budgeting, or investing — I’ll use your budgets and this month’s spend.',
+        'Hi! I’m your SmartSpend Finance Assistant. Let’s build your custom plan to save more and invest wisely. I’ll set smart savings targets and share clear, actionable investment steps tailored to your budget.',
     },
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [tips, setTips] = useState(null);
 
-  // Keep Send button proportional to the input height
+  // Send button sizing
   const [inputBoxHeight, setInputBoxHeight] = useState(46);
-  const btnSize = Math.max(36, Math.min(44, Math.round(inputBoxHeight * 0.78)));
-  const iconSize = Math.max(18, Math.min(28, Math.round(btnSize * 0.65))); // bold arrow
+  const btnSize = Math.max(34, Math.min(40, Math.round(inputBoxHeight * 0.70)));
+  const iconSize = Math.max(16, Math.min(20, Math.round(btnSize * 0.46)));
 
   const quickPrompts = [
-    'How much should I save this month?',
-    'Where can I trim my spending?',
-    'What’s a safe emergency buffer for me?',
+    'What should my monthly savings target be?',
+    'How should I invest my surplus this month?',
+    'What are 3 smart ways I can cut spending?',
   ];
 
   useEffect(() => {
@@ -87,7 +144,7 @@ export default function ChatbotScreen() {
 
     try {
       const res = await askInvestAssistant({ messages: next, targetLang: 'English' });
-      const cleaned = sanitizeReply(res?.message || '');
+      const cleaned = beautifyMarkdown(res?.message || '');
       setMessages([...next, { role: 'assistant', content: cleaned || 'No reply' }]);
 
       const sug =
@@ -124,7 +181,7 @@ export default function ChatbotScreen() {
       {
         role: 'assistant',
         content:
-          'Hi! I’m your SmartSpend coach. Ask about saving, budgeting, or investing — I’ll use your budgets and this month’s spend.',
+          'Hi! I’m your SmartSpend Finance Assistant. Let’s build your custom plan to save more and invest wisely. I’ll set smart savings targets and share clear, actionable investment steps tailored to your budget.',
       },
     ]);
     setTips(null);
@@ -142,13 +199,20 @@ export default function ChatbotScreen() {
       >
         {!isUser && (
           <View style={[styles.avatar, styles.avatarCoach]}>
-            {/* Update path if your logo is elsewhere */}
             <Image source={require('./images/App_Logo.png')} style={styles.avatarImage} />
           </View>
         )}
+
         <View style={[styles.bubble, isUser ? styles.user : styles.bot]}>
-          <Text style={styles.msgText}>{item.content}</Text>
+          {isUser ? (
+            <Text style={styles.msgText}>{item.content}</Text>
+          ) : (
+            <Markdown style={mdStyles} mergeStyle onLinkPress={() => true}>
+              {item.content}
+            </Markdown>
+          )}
         </View>
+
         {isUser && (
           <View style={[styles.avatar, styles.avatarUser]}>
             <Ionicons name="person" size={14} color="#0B1220" />
@@ -157,6 +221,17 @@ export default function ChatbotScreen() {
       </View>
     );
   };
+
+  const TypingRow = (
+    <View style={[styles.rowWrap, { justifyContent: 'flex-start' }]}>
+      <View style={[styles.avatar, styles.avatarCoach]}>
+        <Image source={require('./images/App_Logo.png')} style={styles.avatarImage} />
+      </View>
+      <View style={[styles.bubble, styles.bot, styles.typingBubble]}>
+        <ActivityIndicator size="small" color="#2563EB" />
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.screen}>
@@ -190,63 +265,58 @@ export default function ChatbotScreen() {
         contentContainerStyle={{ padding: 12, gap: 10, paddingBottom: 12 }}
         renderItem={renderItem}
         onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: true })}
-        ListFooterComponent={
-          <>
-            {busy ? (
-              <View style={[styles.rowWrap, { justifyContent: 'flex-start' }]}>
-                <View style={[styles.avatar, styles.avatarCoach]}>
-                  <Image source={require('./images/App_Logo.png')} style={styles.avatarImage} />
+        ListFooterComponent={() =>
+          busy ? (
+            // Loading: only the typing bubble (no prompts/snapshot)
+            TypingRow
+          ) : (
+            <Fragment>
+              {tips ? (
+                <View style={styles.tipsCard}>
+                  <Text style={styles.tipsTitle}>This month snapshot</Text>
+
+                  {tips.monthly_savings_target_lkr != null && (
+                    <View style={[styles.statPill, styles.pillTeal]}>
+                      <Text style={styles.statLabel}>Save target</Text>
+                      <Text style={styles.statValue}>{lkr(tips.monthly_savings_target_lkr)}</Text>
+                    </View>
+                  )}
+
+                  {tips.emergency_buffer_lkr != null && (
+                    <View style={[styles.statPill, styles.pillIndigo]}>
+                      <Text style={styles.statLabel}>Emergency buffer</Text>
+                      <Text style={styles.statValue}>{lkr(tips.emergency_buffer_lkr)}</Text>
+                    </View>
+                  )}
+
+                  {Array.isArray(tips.category_cuts) && tips.category_cuts.length > 0 && (
+                    <View style={styles.cutsBox}>
+                      <Text style={styles.cutsTitle}>Top cut ideas</Text>
+                      {tips.category_cuts.slice(0, 3).map((c, i) => (
+                        <Text key={i} style={styles.cutLine}>
+                          • {c?.category}: {lkr(c?.amount_lkr)} — {c?.tip}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
                 </View>
-                <View style={[styles.bubble, styles.bot, styles.typingBubble]}>
-                  <ActivityIndicator size="small" color="#2563EB" />
-                </View>
+              ) : null}
+
+              {/* Quick prompts (centered) */}
+              <View style={styles.quickStrip}>
+                {quickPrompts.map((p) => (
+                  <Pressable
+                    key={p}
+                    disabled={busy}
+                    onPress={() => handleQuickPrompt(p)}
+                    style={({ pressed }) => [styles.chip, pressed && { opacity: 0.85 }]}
+                  >
+                    <Text style={styles.chipText}>{p}</Text>
+                  </Pressable>
+                ))}
               </View>
-            ) : null}
-
-            {tips ? (
-              <View style={styles.tipsCard}>
-                <Text style={styles.tipsTitle}>This month snapshot</Text>
-
-                {tips.monthly_savings_target_lkr != null && (
-                  <View style={[styles.statPill, styles.pillTeal]}>
-                    <Text style={styles.statLabel}>Save target</Text>
-                    <Text style={styles.statValue}>{lkr(tips.monthly_savings_target_lkr)}</Text>
-                  </View>
-                )}
-
-                {tips.emergency_buffer_lkr != null && (
-                  <View style={[styles.statPill, styles.pillIndigo]}>
-                    <Text style={styles.statLabel}>Emergency buffer</Text>
-                    <Text style={styles.statValue}>{lkr(tips.emergency_buffer_lkr)}</Text>
-                  </View>
-                )}
-
-                {Array.isArray(tips.category_cuts) && tips.category_cuts.length > 0 && (
-                  <View style={styles.cutsBox}>
-                    <Text style={styles.cutsTitle}>Top cut ideas</Text>
-                    {tips.category_cuts.slice(0, 3).map((c, i) => (
-                      <Text key={i} style={styles.cutLine}>
-                        • {c?.category}: {lkr(c?.amount_lkr)} — {c?.tip}
-                      </Text>
-                    ))}
-                  </View>
-                )}
-              </View>
-            ) : null}
-
-            {/* Quick prompts (centered) */}
-            <View style={styles.quickStrip}>
-              {quickPrompts.map((p) => (
-                <Pressable
-                  key={p}
-                  onPress={() => handleQuickPrompt(p)}
-                  style={({ pressed }) => [styles.chip, pressed && { opacity: 0.85 }]}
-                >
-                  <Text style={styles.chipText}>{p}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </>
+            </Fragment>
+          )
         }
       />
 
@@ -271,22 +341,23 @@ export default function ChatbotScreen() {
         <Pressable
           onPress={() => send()}
           disabled={busy}
-          style={[
+          hitSlop={10}
+          android_ripple={{ color: 'rgba(255,255,255,0.25)', borderless: true, radius: btnSize / 2 }}
+          style={({ pressed }) => [
             styles.sendBtn,
-            {
-              height: btnSize,
-              width: btnSize,
-              borderRadius: btnSize / 2, // perfect circle
-            },
-            busy && { opacity: 0.7 },
+            { height: btnSize, width: btnSize, borderRadius: btnSize / 2 },
+            pressed && styles.sendBtnPressed,
+            busy && { opacity: 0.9 }, // keep icon; just dim slightly
           ]}
+          accessibilityRole="button"
+          accessibilityLabel="Send message"
         >
-          {busy ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            // Slightly thick upward arrow, optically centered
-            <Ionicons name="arrow-up-sharp" size={iconSize} color="#FFFFFF" style={{ marginBottom: 1 }} />
-          )}
+          <MaterialIcons
+            name="send"
+            size={iconSize}
+            color="#FFFFFF"
+            style={{ transform: [{ translateX: 0.5 }, { translateY: Platform.OS === 'ios' ? 0.5 : 0 }] }}
+          />
         </Pressable>
       </View>
     </View>
@@ -297,7 +368,7 @@ const styles = StyleSheet.create({
   // Background
   screen: { flex: 1, backgroundColor: '#F6FAFB' },
 
-  // Header (teal background; title pastel purple; Home + subtitle white)
+  // Header
   header: {
     paddingTop: 12,
     paddingBottom: 10,
@@ -317,8 +388,8 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 6, gap: 4 },
   backText: { color: '#FFFFFF', fontWeight: '700' },
   headerMiddle: { alignItems: 'center', flex: 1 },
-  title: { fontSize: 18, fontWeight: '800', color: '#E9D5FF' }, // pastel purple
-  subtitle: { fontSize: 12, color: '#FFFFFF', marginTop: 2 },   // white
+  title: { fontSize: 18, fontWeight: '800', color: '#E9D5FF' },
+  subtitle: { fontSize: 12, color: '#FFFFFF', marginTop: 2 },
 
   // “New Chat” pill
   clearBtn: {
@@ -339,7 +410,7 @@ const styles = StyleSheet.create({
   bubble: {
     padding: 12,
     borderRadius: 16,
-    maxWidth: '80%',
+    maxWidth: '86%',
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 3,
@@ -375,12 +446,26 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   tipsTitle: { fontWeight: '800', color: '#0B1220', marginBottom: 2 },
-  statPill: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
+  statPill: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
   pillTeal: { backgroundColor: '#F0FDFA', borderColor: '#BFF0EA' },
   pillIndigo: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
   statLabel: { color: '#334155', fontWeight: '700' },
   statValue: { color: '#0B1220', fontWeight: '800' },
-  cutsBox: { marginTop: 2, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 10 },
+  cutsBox: {
+    marginTop: 2,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 10,
+  },
   cutsTitle: { color: '#0B1220', fontWeight: '800', marginBottom: 4 },
   cutLine: { color: '#334155', marginTop: 2 },
 
@@ -404,7 +489,7 @@ const styles = StyleSheet.create({
   },
   chipText: { color: '#0B1220', fontWeight: '700', fontSize: 12 },
 
-  // Composer: pastel-purple input with dark-purple outline
+  // Composer
   composerWrap: {
     backgroundColor: '#F6FAFB',
     borderTopWidth: 1,
@@ -430,17 +515,132 @@ const styles = StyleSheet.create({
   },
   input: { minHeight: 40, maxHeight: 140, fontSize: 14, color: '#0B1220' },
 
-  // Send button (peacock blue) — circular, with thick upward arrow
+  // Send button — circular, subtle shadow, deep blue-green
   sendBtn: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#014D4E',
+    backgroundColor: '#022D36',
     borderWidth: 1,
-    borderColor: '#01383A',
+    borderColor: '#001A1F',
     shadowColor: '#000',
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.16,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
+  sendBtnPressed: {
+    backgroundColor: '#01242A',
+    borderColor: '#001319',
+    transform: [{ scale: 0.98 }],
+  },
 });
+
+/* Markdown theme tuned to your chat bubble */
+const mdStyles = {
+  body: { color: '#0B1220', fontSize: 14, lineHeight: 21 },
+  text: { color: '#0B1220' },
+  paragraph: { marginTop: 0, marginBottom: 10 },
+
+  // Colored, padded headings with comfy spacing
+  heading1: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0B1220',
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  heading2: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0B1220',
+    marginTop: 12,
+    marginBottom: 8,
+    backgroundColor: '#F3E8FF',
+    borderColor: '#C4B5FD',
+    borderLeftWidth: 4,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  heading3: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0B1220',
+    marginTop: 12,
+    marginBottom: 8,
+    backgroundColor: '#F0FDFA',
+    borderColor: '#BFF0EA',
+    borderLeftWidth: 4,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  heading4: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0B1220',
+    marginTop: 12,
+    marginBottom: 8,
+    backgroundColor: '#F0FDFA',
+    borderColor: '#BFF0EA',
+    borderLeftWidth: 4,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+
+  strong: { fontWeight: '800', color: '#0B1220' },
+
+  bullet_list: { marginTop: 4, marginBottom: 10 },
+  ordered_list: { marginTop: 4, marginBottom: 10 },
+  list_item: { flexDirection: 'row', marginBottom: 8 },
+  bullet_list_icon: { color: '#0B1220' },
+  ordered_list_icon: { color: '#0B1220' },
+
+  code_inline: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+  },
+  code_block: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+    marginVertical: 10,
+  },
+  fence: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+    marginVertical: 10,
+  },
+  link: { color: '#2563EB' },
+
+  table: {
+    borderColor: '#E5E7EB',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginVertical: 10,
+  },
+  th: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#E5E7EB',
+    borderWidth: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    fontWeight: '800',
+    color: '#0B1220',
+  },
+  tr: { borderColor: '#E5E7EB', borderBottomWidth: 1 },
+  td: { borderColor: '#E5E7EB', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 8 },
+};
