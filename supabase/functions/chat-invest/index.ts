@@ -2,20 +2,18 @@
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ---- env (accept old & new names) ----
-const SUPABASE_URL =
-  Deno.env.get("SUPABASE_URL") ?? Deno.env.get("PROJECT_URL")!;
-const SERVICE_ROLE =
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY")!;
+// ---- env ----
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("PROJECT_URL")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GOOGLE_API_KEY")!;
 
-// Admin client (bypasses RLS for server-side reads)
+// Admin client (server-side reads)
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
 // ---------- utils ----------
 function startOfMonthISO() {
   const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2,"0")}-01`;
 }
 const lkr = (n: number) =>
   `LKR ${Number(n || 0).toLocaleString("en-LK", { minimumFractionDigits: 2 })}`;
@@ -27,19 +25,22 @@ async function loadProfile(uid: string) {
     .select("monthly_income, age")
     .eq("id", uid)
     .maybeSingle();
+
   return {
-    monthly_income: Number(data?.monthly_income || 0),
+    monthly_income: Number((data as any)?.monthly_income || 0),
     age: (data as any)?.age ?? null,
   };
 }
 
 async function loadIncomeThisMonth(uid: string) {
   const first = startOfMonthISO();
+  // prefer the "date" field, fallback to created_at
   let { data } = await admin
     .from("income")
     .select("amount, date, created_at")
     .eq("user_id", uid)
     .gte("date", first);
+
   if (!data?.length) {
     ({ data } = await admin
       .from("income")
@@ -56,6 +57,7 @@ async function loadBudgets(uid: string) {
     .select("name, type, limit_")
     .eq("user_id", uid)
     .eq("type", "expense");
+
   const out: Record<string, number> = {};
   (data || []).forEach((r: any) => {
     const name = String(r?.name || "").trim();
@@ -71,6 +73,7 @@ async function loadMtdActuals(uid: string) {
     .select("amount, date, created_at, categories(name)")
     .eq("user_id", uid)
     .gte("date", first);
+
   if (!data?.length) {
     ({ data } = await admin
       .from("expenses")
@@ -78,6 +81,7 @@ async function loadMtdActuals(uid: string) {
       .eq("user_id", uid)
       .gte("created_at", first));
   }
+
   const byCat: Record<string, number> = {};
   (data || []).forEach((r: any) => {
     const cat = r?.categories?.name ?? "Uncategorized";
@@ -97,18 +101,11 @@ async function load90dTotal(uid: string) {
 }
 
 // ---------- rules ----------
-const DISCRETIONARY = new Set([
-  "Entertainment",
-  "Eating Out",
-  "Shopping",
-  "Clothing",
-  "Travel",
-  "Gifts",
-]);
-const SEMI_FLEX = new Set(["Transport", "Groceries", "Food"]);
+const DISCRETIONARY = new Set(["Entertainment","Eating Out","Shopping","Clothing","Travel","Gifts"]);
+const SEMI_FLEX = new Set(["Transport","Groceries","Food"]);
 
 function computeRules(
-  income: number,
+  incomeEffective: number,
   mtd: number,
   exp90: number,
   budgets: Record<string, number>,
@@ -124,31 +121,23 @@ function computeRules(
       break;
     }
   }
-  const savingsTarget =
-    income > 0 ? savingsBudget || Math.max(0, 0.18 * income) : savingsBudget;
+  const savingsTarget = incomeEffective > 0
+    ? savingsBudget || Math.max(0, 0.18 * incomeEffective)
+    : savingsBudget;
 
   const cuts: any[] = [];
-  // overspends
   for (const [name, planned] of Object.entries(budgets)) {
     const actual = Number(actuals[name] || 0);
     if (planned > 0 && actual > planned) {
       const suggest = Math.min(0.15 * planned, actual - planned);
-      const tip =
-        name === "Food" || name === "Eating Out"
-          ? "Set a weekly cap & mid-week review"
-          : "Enable alerts and use price anchors";
-      cuts.push({
-        category: name,
-        amount_lkr: Math.round(suggest * 100) / 100,
-        tip,
-      });
+      const tip = (name === "Food" || name === "Eating Out")
+        ? "Set a weekly cap & mid-week review"
+        : "Enable alerts and use price anchors";
+      cuts.push({ category: name, amount_lkr: Math.round(suggest * 100) / 100, tip });
     }
   }
-  // if no overspends, propose micro-cuts
   if (!cuts.length) {
-    for (const [name, val] of Object.entries(
-      actuals as Record<string, number>
-    ).sort((a, b) => Number(b[1]) - Number(a[1]))) {
+    for (const [name, val] of Object.entries(actuals).sort((a, b) => Number(b[1]) - Number(a[1]))) {
       if (DISCRETIONARY.has(name) || SEMI_FLEX.has(name)) {
         cuts.push({
           category: name,
@@ -169,33 +158,29 @@ function computeRules(
 
 function buildPrompt(
   userQ: string,
-  profile: any,
-  incomeExtra: number,
+  incomeEffective: number,
   budgets: Record<string, number>,
   actuals: Record<string, number>,
   rules: any,
   targetLang = "English"
 ) {
-  const incomeEst =
-    Number(profile?.monthly_income || 0) + Number(incomeExtra || 0);
   const bLines =
     Object.entries(budgets)
-      .map(
-        ([k, v]) => `- ${k}: planned ${lkr(v)}, actual ${lkr(actuals[k] || 0)}`
-      )
+      .map(([k, v]) => `- ${k}: planned ${lkr(v)}, actual ${lkr(actuals[k] || 0)}`)
       .join("\n") || "- (no budgets)";
+
   return `
-System: You are SmartSpend’s financial assistant for Sri Lankan users. Always use LKR, be conservative and actionable. Use the user's own budgets and month-to-date actuals. This is general guidance, not financial advice.
+System: You are SmartSpend’s financial assistant for Sri Lankan users.
+Always use LKR, be conservative and actionable. Use the user's budgets and month-to-date actuals.
+If a number is missing, ask for it — never make one up.
 
 Answer in: ${targetLang}
 
 User question:
 ${userQ}
 
-User profile
-- Monthly income (base): ${lkr(profile?.monthly_income || 0)}
-- Extra income this month: ${lkr(incomeExtra)}
-- Estimated monthly income: ${lkr(incomeEst)}
+Financial snapshot (authoritative)
+- Estimated monthly income to use: ${lkr(incomeEffective)}
 
 Budgets (this month)
 ${bLines}
@@ -221,22 +206,16 @@ Keep options accessible/low-complexity for Sri Lanka (buffer first; conservative
 function extractSuggestions(text: string) {
   const m = text.match(/SUGGESTIONS[\s\S]*?({[\s\S]*?})/i);
   if (!m) return {};
-  try {
-    return JSON.parse(m[1]);
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(m[1]); } catch { return {}; }
 }
 
 // ---------- HTTP handler ----------
 Deno.serve(async (req: Request) => {
-  // CORS / preflight
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers":
-          "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
       },
     });
@@ -251,15 +230,13 @@ Deno.serve(async (req: Request) => {
         .find((m: any) => m?.role === "user")?.content ||
       "Advise me on saving and investing this month.";
 
-    // Resolve user id:
-    // 1) prefer explicit userId (manual tests)
-    // 2) else decode the Authorization bearer (from supabase.functions.invoke)
+    // Resolve user id from auth (preferred) or explicit body.userId
     let uid: string = String(body?.userId || "");
     if (!uid) {
       const auth = req.headers.get("Authorization") || "";
       if (auth.startsWith("Bearer ")) {
         const token = auth.slice(7);
-        const anonKey = req.headers.get("apikey") || undefined; // safer than SERVICE_ROLE
+        const anonKey = req.headers.get("apikey") || undefined;
         const client = createClient(SUPABASE_URL, anonKey ?? SERVICE_ROLE, {
           global: { headers: { Authorization: `Bearer ${token}` } },
         });
@@ -270,15 +247,12 @@ Deno.serve(async (req: Request) => {
     if (!uid) {
       return new Response(JSON.stringify({ error: "userId required" }), {
         status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
     }
 
-    // personalized data
-    const [profile, incomeExtra, budgets, actuals, exp90] = await Promise.all([
+    // Load data
+    const [profile, incomeMTD, budgets, actuals, exp90] = await Promise.all([
       loadProfile(uid),
       loadIncomeThisMonth(uid),
       loadBudgets(uid),
@@ -286,54 +260,33 @@ Deno.serve(async (req: Request) => {
       load90dTotal(uid),
     ]);
 
-    const mtdTotal = (Object.values(actuals) as number[]).reduce(
-      (s: number, v) => s + (Number(v) || 0),
-      0
-    );
-    const incomeEst =
-      Number((profile as any).monthly_income || 0) + Number(incomeExtra || 0);
-    const rules = computeRules(incomeEst, mtdTotal, exp90, budgets, actuals);
+    // *** KEY FIX: choose ONE income source (no double-counting) ***
+    const baseIncome = Number((profile as any).monthly_income || 0);
+    const incomeEffective = incomeMTD > 0 ? incomeMTD : baseIncome;
+    const incomeSource = incomeMTD > 0 ? "income_table_mtd" : "users.monthly_income";
 
-    // -------- Gemini REST call (flash model + robust extraction) --------
-    const prompt = buildPrompt(
-      userMessage,
-      profile,
-      incomeExtra,
-      budgets,
-      actuals,
-      rules,
-      targetLang
-    );
+    const mtdTotal = Object.values(actuals).reduce((s, v) => s + (Number(v) || 0), 0);
+    const rules = computeRules(incomeEffective, mtdTotal, exp90, budgets, actuals);
+
+    // --- Gemini ---
+    const prompt = buildPrompt(userMessage, incomeEffective, budgets, actuals, rules, targetLang);
 
     const model = "gemini-1.5-flash";
-    const payload = {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-    };
+    const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 1024 } };
 
     const gemRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
     );
-
     const gemJson: any = await gemRes.json();
 
-    // Try multiple shapes Google returns
     let text = "";
     try {
       const cand = gemJson?.candidates?.[0];
       const parts = cand?.content?.parts;
-      if (Array.isArray(parts)) {
-        text = parts.map((p: any) => p?.text).filter(Boolean).join("\n").trim();
-      }
+      if (Array.isArray(parts)) text = parts.map((p: any) => p?.text).filter(Boolean).join("\n").trim();
     } catch {}
-    if (!text) {
-      text = gemJson?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    }
+    if (!text) text = gemJson?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     if (!text) {
       const reason =
         gemJson?.candidates?.[0]?.finishReason ||
@@ -344,11 +297,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const suggestions = extractSuggestions(text);
-
-    // Hide the raw suggestions JSON in the chat bubble
     const displayText = (text || "")
-      .replace(/```json[\s\S]*?```/gi, "")           // remove fenced JSON block
-      .replace(/\*\*SUGGESTIONS:\*\*[\s\S]*$/i, "")  // remove trailing "SUGGESTIONS:" section
+      .replace(/```json[\s\S]*?```/gi, "")
+      .replace(/\*\*SUGGESTIONS:\*\*[\s\S]*$/i, "")
       .trim();
 
     return new Response(
@@ -356,27 +307,21 @@ Deno.serve(async (req: Request) => {
         message: displayText,
         suggestions,
         snapshot: {
-          income_base: (profile as any).monthly_income,
-          income_extra_mtd: incomeExtra,
+          income_source: incomeSource,
+          income_effective: incomeEffective,     // <= the value used (either MTD or base)
+          income_base: baseIncome,
+          income_mtd: incomeMTD,
           budgets,
           actuals_mtd: actuals,
           rules,
         },
       }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
     );
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
     });
   }
 });

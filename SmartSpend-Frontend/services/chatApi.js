@@ -1,9 +1,9 @@
 // SmartSpend-Frontend/services/chatApi.js
 import { supabase } from './supabase';
 
-export async function askInvestAssistant({ messages, targetLang = 'English' }) {
+export async function askInvestAssistant({ messages, targetLang = 'English', grounding }) {
   const { data, error } = await supabase.functions.invoke('chat-invest', {
-    body: { messages, targetLang },
+    body: { messages, targetLang, grounding },
   });
   if (error) throw error;
   return data; // { message, suggestions, snapshot }

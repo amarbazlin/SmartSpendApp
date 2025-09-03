@@ -1,60 +1,26 @@
 // TransactionsScreen.js
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigation } from '@react-navigation/native';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet, // keep; your styles live at the bottom in your project
-  SafeAreaView,
-  ScrollView,
-  Image,
-  Modal,
-  Alert,
-  StatusBar,
-  Platform,
-  FlatList,
-  SectionList,
-  PermissionsAndroid,
-  TextInput,
-  ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Image, Modal,
+  Alert, StatusBar, Platform, FlatList, SectionList, PermissionsAndroid, TextInput, ActivityIndicator,
 } from 'react-native';
 import {
-  Home,
-  Edit3,
-  Trash2,
-  Wallet,
-  DollarSign,
-  MoreHorizontal,
-  Lock,
-  X,
-  Bell,
-  Palette,
-  Globe,
-  LogOut,
+  Home, Edit3, Trash2, Wallet, DollarSign, MoreHorizontal, Lock, X, Bell, Palette, Globe, LogOut,
 } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { supabase } from '../services/supabase';
 import TransactionForm from './Transaction';
 
 const SmsAndroid = Platform.OS === 'android' ? require('react-native-get-sms-android') : null;
+const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/** Helper: local yyyy-mm-dd */
-const ymdLocal = (d) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-/* ------------------------------ Local Parser ------------------------------ */
 const parseBankSMS = (sms) => {
   if (!sms || typeof sms !== 'string') return null;
-
   const body = sms.replace(/\s+/g, ' ').trim();
+  if (/(OTP|One[-\s]?Time\s*Password|verification code|promo|offer|points|reward)/i.test(body)) return null;
 
-  // Ignore OTP / promo
-  if (/(OTP|One[-\s]?Time\s*Password|verification code|promo|offer|points|reward)/i.test(body)) {
-    return null;
-  }
-
-  // -------- amount detection --------
   const amountMatchers = [
     /Amount\(Approx\.?\)\s*:\s*([\d,]+(?:\.\d+)?)\s*(?:LKR|Rs\.?|රු\.?)?/i,
     /Amount\s*:\s*([\d,]+(?:\.\d+)?)\s*(?:LKR|Rs\.?|රු\.?)?/i,
@@ -66,62 +32,27 @@ const parseBankSMS = (sms) => {
   let rawAmount = null;
   for (const rx of amountMatchers) {
     const m = body.match(rx);
-    if (m) {
-      rawAmount = m[2] || m[1];
-      if (rawAmount) break;
-    }
+    if (m) { rawAmount = m[2] || m[1]; if (rawAmount) break; }
   }
   if (!rawAmount) return null;
 
   const amount = parseFloat(rawAmount.replace(/,/g, ''));
   if (!isFinite(amount)) return null;
 
-  // -------- type detection --------
   const expenseTriggers = [
-    'debited',
-    'spent',
-    'purchase',
-    'withdraw',
-    'cash wd',
-    'payment',
-    'bill',
-    'tap&go',
-    'tap & go',
-    'lankaqr',
-    'qr payment',
-    'transfer from',
-    'standing order',
-    'so executed',
-    'charge',
-    'fee',
-    'cash advance',
-    'pre-auth completion',
+    'debited','spent','purchase','withdraw','cash wd','payment','bill','tap&go','tap & go',
+    'lankaqr','qr payment','transfer from','standing order','so executed','charge','fee','cash advance','pre-auth completion',
   ];
-  const incomeTriggers = [
-    'credited',
-    'received',
-    'salary',
-    'deposit',
-    'loan disbursement',
-    'reversal',
-    'refund',
-    'interest',
-    'fd',
-  ];
+  const incomeTriggers = ['credited','received','salary','deposit','loan disbursement','reversal','refund','interest','fd'];
 
   const expenseRegex = new RegExp(expenseTriggers.join('|'), 'i');
-  const incomeRegex = new RegExp(incomeTriggers.join('|'), 'i');
-
+  const incomeRegex  = new RegExp(incomeTriggers.join('|'), 'i');
   let type = null;
   if (incomeRegex.test(body) && !expenseRegex.test(body)) type = 'income';
   else if (expenseRegex.test(body) && !incomeRegex.test(body)) type = 'expense';
-  else {
-    if (/debited/i.test(body)) type = 'expense';
-    else if (/credited/i.test(body)) type = 'income';
-  }
+  else { if (/debited/i.test(body)) type = 'expense'; else if (/credited/i.test(body)) type = 'income'; }
   if (!type) return null;
 
-  // -------- category guess --------
   let category = 'Other';
   if (type === 'income') {
     if (/salary/i.test(body)) category = 'Salary';
@@ -136,7 +67,6 @@ const parseBankSMS = (sms) => {
     else category = 'Other';
   }
 
-  // -------- merchant / location --------
   let merchant = null;
   let merchantMatch =
     body.match(/\bat\s+([A-Za-z0-9 &\-\.\(\)\/]+?)(?=(?: on |\d{2}\.\d{2}\.\d{2}|\d{2}\/\d{2}| \d{4}-\d{2}-\d{2}| using | via | Acc | Card |$|\.|,))/i) ||
@@ -144,178 +74,95 @@ const parseBankSMS = (sms) => {
     body.match(/Location\s*:\s*([^,]+)/i);
   if (merchantMatch && merchantMatch[1]) merchant = merchantMatch[1].trim();
 
-  return {
-    type,
-    category,
-    merchant: merchant || 'Unknown',
-    amount,
-    description: sms,
-    account: 'Bank',
-  };
+  return { type, category, merchant: merchant || 'Unknown', amount, description: sms, account: 'Bank' };
 };
 
-const tabs = ['Daily', 'Monthly', 'Summary'];
+const localeFor = (lang) => (lang === 'si' ? 'si-LK' : lang === 'ta' ? 'ta-IN' : 'en-US');
 
 /* ----------------------------- More Menu modal ---------------------------- */
-const MoreMenu = ({ isOpen, onClose, onLogout }) => {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(true);
+const MoreMenu = ({ isOpen, onClose, onLogout, navigation }) => {
+  const { t } = useTranslation();
+  const [name, setName] = useState(''); const [email, setEmail] = useState(''); const [loading, setLoading] = useState(true);
+
+  const goToLanguage = () => { onClose?.(); setTimeout(() => navigation?.navigate?.('LanguageSettings'), 0); };
 
   useEffect(() => {
     if (!isOpen) return;
-
     const loadUser = async () => {
       try {
         setLoading(true);
-
-        const {
-          data: { user },
-          error: userErr,
-        } = await supabase.auth.getUser();
-
+        const { data: { user }, error: userErr } = await supabase.auth.getUser();
         if (userErr) throw userErr;
-        if (!user) {
-          setName('');
-          setEmail('');
-          return;
-        }
-
+        if (!user) { setName(''); setEmail(''); return; }
         setEmail(user.email ?? '');
-
-        const metaName =
-          user.user_metadata?.full_name ||
-          user.user_metadata?.name ||
-          user.user_metadata?.username ||
-          '';
-
-        if (metaName) {
-          setName(metaName);
-          return;
-        }
-
-        const { data: profileById } = await supabase
-          .from('users')
-          .select('name, email')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (profileById?.name) {
-          setName(profileById.name);
-          return;
-        }
-
-        const { data: profileByEmail } = await supabase
-          .from('users')
-          .select('name')
-          .eq('email', user.email)
-          .maybeSingle();
-
+        const metaName = user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.username || '';
+        if (metaName) { setName(metaName); return; }
+        const { data: profileById } = await supabase.from('users').select('name,email').eq('id', user.id).maybeSingle();
+        if (profileById?.name) { setName(profileById.name); return; }
+        const { data: profileByEmail } = await supabase.from('users').select('name').eq('email', user.email).maybeSingle();
         setName(profileByEmail?.name || '');
       } catch (e) {
         console.warn('Error loading profile', e);
-      } finally {
-        setLoading(false);
-      }
+      } finally { setLoading(false); }
     };
-
     loadUser();
   }, [isOpen]);
 
   return (
-    <Modal
-      visible={isOpen}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
+    <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.moreModalOverlay}>
-        <TouchableOpacity 
-          style={styles.moreBackdrop} 
-          onPress={onClose}
-          activeOpacity={1}
-        />
-        
+        <TouchableOpacity style={styles.moreBackdrop} onPress={onClose} activeOpacity={1} />
         <View style={styles.moreMenu}>
           <ScrollView style={styles.moreMenuContent}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.profileSection}>
                 <View style={styles.profileImage}>
-                  <Image
-                    source={require('./images/App_Logo.png')}
-                    style={styles.profileImageContent}
-                    resizeMode="cover"
-                  />
+                  <Image source={require('./images/App_Logo.png')} style={styles.profileImageContent} resizeMode="cover" />
                 </View>
-
-                {loading ? (
-                  <ActivityIndicator size="small" color="#6B7280" />
-                ) : (
+                {loading ? <ActivityIndicator size="small" color="#6B7280" /> : (
                   <View style={styles.profileInfo}>
                     <Text style={styles.profileName}>{name || '—'}</Text>
                     <Text style={styles.profileEmail}>{email}</Text>
                   </View>
                 )}
               </View>
-
-              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <X size={20} color="#6B7280" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}><X size={20} color="#6B7280" /></TouchableOpacity>
             </View>
 
             <View style={styles.menuItems}>
               <TouchableOpacity style={styles.menuItem}>
                 <Lock size={20} color="#6B7280" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.menuItemTitle}>Passcode</Text>
-                  <Text style={styles.menuItemSubtitle}>OFF</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.menuItemTitle}>{t('menu.passcode')}</Text><Text style={styles.menuItemSubtitle}>OFF</Text></View>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.menuItem}>
                 <DollarSign size={20} color="#6B7280" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.menuItemTitle}>Main Currency Setting</Text>
-                  <Text style={styles.menuItemSubtitle}>LKR(Rs.)</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.menuItemTitle}>{t('menu.mainCurrency')}</Text><Text style={styles.menuItemSubtitle}>LKR(Rs.)</Text></View>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.menuItem}>
                 <Wallet size={20} color="#6B7280" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.menuItemTitle}>Sub Currency Setting</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.menuItemTitle}>{t('menu.subCurrency')}</Text></View>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.menuItem}>
                 <Bell size={20} color="#6B7280" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.menuItemTitle}>Alarm Setting</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.menuItemTitle}>{t('menu.alarm')}</Text></View>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.menuItem}>
                 <Palette size={20} color="#6B7280" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.menuItemTitle}>Style</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.menuItemTitle}>{t('menu.style')}</Text></View>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.menuItem}>
+              <TouchableOpacity style={styles.menuItem} onPress={goToLanguage}>
                 <Globe size={20} color="#6B7280" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.menuItemTitle}>Language Setting</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.menuItemTitle}>{t('menu.language')}</Text></View>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={[styles.menuItem, styles.logoutItem]}
-                onPress={onLogout}
-              >
+              <TouchableOpacity style={[styles.menuItem, styles.logoutItem]} onPress={onLogout}>
                 <LogOut size={20} color="#EF4444" style={styles.menuIcon} />
-                <View style={styles.menuItemContent}>
-                  <Text style={styles.logoutText}>Logout</Text>
-                </View>
+                <View style={styles.menuItemContent}><Text style={styles.logoutText}>{t('menu.logout')}</Text></View>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -326,14 +173,17 @@ const MoreMenu = ({ isOpen, onClose, onLogout }) => {
 };
 
 /* ------------------------------- Main Screen ------------------------------- */
-export default function TransactionsScreen({ onBack, onLogout }) {
-  const navigation = useNavigation();
+export default function TransactionsScreen({ onBack, onLogout, navigation }) {
+  const { t } = useTranslation();
+  const lang = i18n.language;
+  const locale = localeFor(lang);
 
   const isSubmittingRef = useRef(false);
   const alertLockRef = useRef(false);
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-  const [selectedTab, setSelectedTab] = useState('Daily');
+  const [selectedTab, setSelectedTab] = useState('daily'); // 'daily' | 'monthly' | 'summary'
+  const [typeFilter, setTypeFilter] = useState('all');     // 'all' | 'income' | 'expense'
 
   const [transactions, setTransactions] = useState([]);
   const [income, setIncome] = useState(0);
@@ -346,74 +196,65 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const [showTransactionForm, setShowTransactionForm] = useState(false);
   const [editTx, setEditTx] = useState(null);
 
-  const [showActions, setShowActions] = useState(false);
-  const [actionTx, setActionTx] = useState(null);
-
   const [importedFromSMS, setImportedFromSMS] = useState(0);
   const [smsText, setSmsText] = useState('');
 
   const [selectedTransaction, setSelectedTransaction] = useState(null);
 
-  // NEW: filter which type to show (default = 'all' == Total)
-  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'income' | 'expense'
-
   const today = new Date();
   const monthStart = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
   const nextMonthStart = useMemo(() => new Date(today.getFullYear(), today.getMonth() + 1, 1), [today]);
 
-  /* -------------------------------- Helpers -------------------------------- */
+  const tabs = useMemo(
+    () => ([
+      { key: 'daily',   label: t('tx.tabs.daily') },
+      { key: 'monthly', label: t('tx.tabs.monthly') },
+      { key: 'summary', label: t('tx.tabs.summary') },
+    ]),
+    [t, lang]
+  );
 
+  /* -------------------------------- Helpers -------------------------------- */
   const safeAlert = useCallback((title, message) => {
     if (alertLockRef.current) return;
     alertLockRef.current = true;
-    Alert.alert(title, message, [
-      { text: 'OK', onPress: () => { alertLockRef.current = false; } },
-    ]);
-  }, []);
+    Alert.alert(title, message, [{ text: t('common.ok', 'OK'), onPress: () => { alertLockRef.current = false; } }]);
+  }, [t]);
 
   const confirmDelete = (tx) => {
-    Alert.alert('Delete', 'Are you sure you want to delete this transaction?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteTransaction(tx) },
-    ]);
+    Alert.alert(
+      t('common.delete'),
+      t('tx.deleteConfirm'),
+      [{ text: t('common.cancel'), style: 'cancel' }, { text: t('common.delete'), style: 'destructive', onPress: () => deleteTransaction(tx) }]
+    );
   };
 
   const deleteTransaction = async (tx) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const table = tx.type === 'income' ? 'income' : 'expenses';
-
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .eq('id', tx.id)
-        .eq('user_id', user.id);
-
+      const { error } = await supabase.from(table).delete().eq('id', tx.id).eq('user_id', user.id);
       if (error) throw error;
       await fetchTransactions();
     } catch (e) {
       console.error('deleteTransaction error', e);
-      safeAlert('Error', e.message || 'Failed to delete');
+      safeAlert(t('common.error'), e.message || 'Failed to delete');
     }
   };
 
   const startEdit = (tx) => {
     const editTransaction = {
       ...tx,
-      account: tx.payment_method === 'Bank' ? 'Bank' : (tx.payment_method || 'Cash'),
+      account: tx.payment_method === 'Bank' ? 'Bank' : tx.payment_method || 'Cash',
       category: tx.category,
     };
     setEditTx(editTransaction);
     setShowTransactionForm(true);
   };
 
-  /* ---------- Negative-total guard helpers ---------- */
   const getMonthBoundsFromDateString = (dateStr) => {
     const d = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
-    return {
-      start: new Date(d.getFullYear(), d.getMonth(), 1),
-      end: new Date(d.getFullYear(), d.getMonth() + 1, 1),
-    };
+    return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: new Date(d.getFullYear(), d.getMonth() + 1, 1) };
   };
 
   const getMonthlyTotalsForDate = useCallback((dateStr) => {
@@ -429,97 +270,62 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     return { inc, exp, start, end };
   }, [transactions]);
 
-  /** INSERT (Add) */
   const handleTransactionAdded = useCallback(async (t) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
 
     try {
       const { data: { user }, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !user) {
-        safeAlert('Error', 'No user session');
-        return;
-      }
+      if (userErr || !user) { safeAlert(t('common.error'), t('tx.msg.noUser', 'No user session')); return; }
 
       const amt = Number(t.amount);
-      if (!isFinite(amt)) {
-        throw new Error('Parsed amount is invalid');
-      }
-
+      if (!isFinite(amt)) { throw new Error('Parsed amount is invalid'); }
       const localDate = t.date || ymdLocal(new Date());
 
-      // GUARD: block expense that would make the month negative
       if (t.type === 'expense') {
         const { inc, exp } = getMonthlyTotalsForDate(localDate);
         const available = inc - exp;
         if (amt > available) {
-          safeAlert(
-            'Not allowed',
-            `This expense would make your monthly total negative.\nAvailable this month: Rs. ${available.toFixed(2)}`
-          );
-          return; // do NOT insert
+          safeAlert(t('tx.guard.title', 'Not allowed'), t('tx.guard.msg', { amount: available.toFixed(2) }));
+          return;
         }
       }
 
       let catId = t.category_id ?? null;
-
       if (!catId && t.category) {
-        const { data: catRow, error: catErr } = await supabase
-          .from('categories')
-          .select('id')
-          .eq('name', t.category)
-          .maybeSingle();
-        if (!catErr && catRow?.id) {
-          catId = catRow.id;
-        } else {
-          const { data: otherRow } = await supabase
-            .from('categories')
-            .select('id')
-            .eq('name', 'Other')
-            .maybeSingle();
+        const { data: catRow, error: catErr } = await supabase.from('categories').select('id').eq('name', t.category).maybeSingle();
+        if (!catErr && catRow?.id) catId = catRow.id;
+        else {
+          const { data: otherRow } = await supabase.from('categories').select('id').eq('name', 'Other').maybeSingle();
           if (otherRow?.id) catId = otherRow.id;
         }
       }
 
       if (t.type === 'income') {
-        const { error } = await supabase.from('income').insert([{
-          user_id: user.id,
-          source: t.category || 'Other',
-          amount: amt,
-          date: localDate,
-          note: t.note || null,
-        }]);
+        const { error } = await supabase.from('income').insert([{ user_id: user.id, source: t.category || 'Other', amount: amt, date: localDate, note: t.note || null }]);
         if (error) throw error;
       } else {
         const { error } = await supabase.from('expenses').insert([{
-          user_id: user.id,
-          category_id: catId,
-          amount: amt,
-          payment_method: t.account || 'Cash',
-          note: t.note || (t.merchant ? `Location: ${t.merchant}` : null),
-          description: t.description || null,
-          date: localDate,
-        }]);
-        if (error) throw error;
+          user_id: user.id, category_id: catId, amount: amt, payment_method: t.account || 'Cash',
+          note: t.note || (t.merchant ? `Location: ${t.merchant}` : null), description: t.description || null, date: localDate,
+        }]); if (error) throw error;
       }
 
       await fetchTransactions();
       setShowTransactionForm(false);
-      safeAlert('Success', 'Transaction added successfully');
+      safeAlert(t('common.success'), t('tx.msg.added', 'Transaction added successfully'));
     } catch (error) {
       console.error('Error adding transaction:', error);
-      safeAlert('Error', error.message || 'Failed to add transaction');
+      safeAlert(t('common.error'), error.message || 'Failed to add transaction');
     } finally {
       isSubmittingRef.current = false;
     }
-  }, [fetchTransactions, safeAlert, getMonthlyTotalsForDate]);
+  }, [fetchTransactions, safeAlert, getMonthlyTotalsForDate, t]);
 
-  /** UPDATE */
   const handleTransactionUpdated = useCallback(async (payload) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     try {
-      // GUARD: editing an expense must not make month negative
       if (editTx && editTx.type === 'expense') {
         const targetDate = editTx.date || ymdLocal(new Date());
         const { inc, exp } = getMonthlyTotalsForDate(targetDate);
@@ -527,14 +333,13 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         const currentAmt = Number(editTx.amount || 0);
         const proposedAmt = Number(payload.amount);
 
-        // remove original from month then check with proposed
         const availableIfWeRemoveOriginal = inc - (exp - currentAmt);
         if (proposedAmt > availableIfWeRemoveOriginal) {
           safeAlert(
-            'Not allowed',
-            `This update would make your monthly total negative.\nAvailable for this month: Rs. ${availableIfWeRemoveOriginal.toFixed(2)}`
+            t('tx.guard.title', 'Not allowed'),
+            t('tx.guard.msg', { amount: availableIfWeRemoveOriginal.toFixed(2) })
           );
-          return; // do NOT update
+          return;
         }
       }
 
@@ -552,14 +357,12 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       await fetchTransactions();
       setShowTransactionForm(false);
       setEditTx(null);
-      safeAlert('Success', 'Transaction updated successfully');
+      safeAlert(t('common.success'), t('tx.msg.updated', 'Transaction updated successfully'));
     } catch (e) {
       console.error(e);
-      safeAlert('Update failed', e.message);
-    } finally {
-      isSubmittingRef.current = false;
-    }
-  }, [editTx, fetchTransactions, safeAlert, getMonthlyTotalsForDate]);
+      safeAlert(t('common.error'), e.message);
+    } finally { isSubmittingRef.current = false; }
+  }, [editTx, fetchTransactions, safeAlert, getMonthlyTotalsForDate, t]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -574,116 +377,75 @@ export default function TransactionsScreen({ onBack, onLogout }) {
   const fetchTransactions = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-
-    const { data, error } = await supabase
-      .from('transactions') // view
-      .select('*')
-      .eq('user_id', user.id)
-      .order('date', { ascending: false });
-
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('date', { ascending: false });
       if (error) throw error;
-
       const seen = new Set();
       const deduped = [];
-      for (const t of (data || [])) {
+      for (const t of data || []) {
         const key = `${t.type}:${t.id}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          deduped.push(t);
-        }
+        if (!seen.has(key)) { seen.add(key); deduped.push(t); }
       }
       setTransactions(deduped);
     } catch (error) {
       console.error('Error fetching transactions:', error);
-      safeAlert('Error', 'Failed to fetch transactions');
+      safeAlert(t('common.error'), t('tx.msg.fetchFail', 'Failed to fetch transactions'));
     }
-  }, [safeAlert]);
+  }, [safeAlert, t]);
 
   const calculateMonthTotals = useCallback((transactionData) => {
-    const monthTx = transactionData.filter(t => {
+    const monthTx = transactionData.filter((t) => {
       const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
       return dt >= monthStart && dt < nextMonthStart;
     });
-
-    const totalIncome = monthTx
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-
-    const totalExpenses = monthTx
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-
-    setIncome(totalIncome);
-    setExpenses(totalExpenses);
+    const totalIncome = monthTx.filter((t) => t.type === 'income').reduce((s, x) => s + Number(x.amount || 0), 0);
+    const totalExpenses = monthTx.filter((t) => t.type === 'expense').reduce((s, x) => s + Number(x.amount || 0), 0);
+    setIncome(totalIncome); setExpenses(totalExpenses);
   }, [monthStart, nextMonthStart]);
 
   const generateMonthlyData = useCallback(() => {
-    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-    const monthlyStats = monthNames.map((month, index) => {
-      const monthTransactions = transactions.filter(transaction => {
+    const monthlyStats = Array.from({ length: 12 }, (_, index) => {
+      const monthName = new Intl.DateTimeFormat(locale, { month: 'short' }).format(new Date(currentYear, index, 1));
+      const monthTransactions = transactions.filter((transaction) => {
         const dt = transaction.date ? new Date(`${transaction.date}T00:00:00`) : new Date();
         return dt.getFullYear() === currentYear && dt.getMonth() === index;
       });
 
-      const monthIncome = monthTransactions
-        .filter(t => t.type === 'income')
-        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-
-      const monthExpenses = monthTransactions
-        .filter(t => t.type === 'expense')
-        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const monthIncome = monthTransactions.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+      const monthExpenses = monthTransactions.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
 
       const startDate = `${String(index + 1).padStart(2, '0')}/01`;
       const endDate = `${String(index + 1).padStart(2, '0')}/${new Date(currentYear, index + 1, 0).getDate()}`;
 
-      return {
-        month,
-        dateRange: `${startDate} ~ ${endDate}`,
-        income: monthIncome,
-        expenses: monthExpenses,
-        total: monthIncome - monthExpenses,
-      };
+      return { month: monthName, dateRange: `${startDate} ~ ${endDate}`, income: monthIncome, expenses: monthExpenses, total: monthIncome - monthExpenses };
     });
-
     setMonthlyData(monthlyStats);
-  }, [transactions, currentYear]);
+  }, [transactions, currentYear, locale]);
 
   const getDailyTotals = useCallback((date = new Date()) => {
-    const y = date.getFullYear();
-    const m = date.getMonth();
-    const d = date.getDate();
+    const y = date.getFullYear(); const m = date.getMonth(); const d = date.getDate();
     let incomeDay = 0, expenseDay = 0;
-
     const todayKey = ymdLocal(new Date(y, m, d));
-
-    transactions.forEach(t => {
+    transactions.forEach((t) => {
       const key = t.date || ymdLocal(new Date());
-      if (key === todayKey) {
-        if (t.type === 'income') incomeDay += Number(t.amount) || 0;
-        else expenseDay += Number(t.amount) || 0;
-      }
+      if (key === todayKey) { if (t.type === 'income') incomeDay += Number(t.amount) || 0; else expenseDay += Number(t.amount) || 0; }
     });
-
     return { incomeDay, expenseDay };
   }, [transactions]);
 
-  // NEW: apply summary filter to transactions for the list views
-  const filteredTransactions = useMemo(() => {
-    if (typeFilter === 'all') return transactions;
-    return transactions.filter(t => t.type === typeFilter);
-  }, [transactions, typeFilter]);
+  const filteredTransactions = useMemo(() => (typeFilter === 'all' ? transactions : transactions.filter((t) => t.type === typeFilter)), [transactions, typeFilter]);
 
-  const currentMonthTransactions = useMemo(() => {
-    return filteredTransactions.filter(t => {
-      const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
-      return dt >= monthStart && dt < nextMonthStart;
-    });
-  }, [filteredTransactions, monthStart, nextMonthStart]);
+  const currentMonthTransactions = useMemo(() => filteredTransactions.filter((t) => {
+    const dt = t.date ? new Date(`${t.date}T00:00:00`) : new Date();
+    return dt >= monthStart && dt < nextMonthStart;
+  }), [filteredTransactions, monthStart, nextMonthStart]);
 
   const dailySections = useMemo(() => {
     const map = new Map();
-    currentMonthTransactions.forEach(t => {
+    currentMonthTransactions.forEach((t) => {
       const key = t.date || ymdLocal(new Date());
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(t);
@@ -691,51 +453,83 @@ export default function TransactionsScreen({ onBack, onLogout }) {
 
     const sections = Array.from(map.entries())
       .sort(([a], [b]) => (a > b ? -1 : 1))
-      .map(([dateKey, items]) => {
+      .map(([dateKey, items], idx) => {
         const [year, month, day] = dateKey.split('-');
         const d = new Date(Number(year), Number(month) - 1, Number(day));
 
-        const incomeDay = items
-          .filter(x => x.type === 'income')
-          .reduce((s, x) => s + Number(x.amount || 0), 0);
-        const expenseDay = items
-          .filter(x => x.type === 'expense')
-          .reduce((s, x) => s + Number(x.amount || 0), 0);
+        const incomeDay = items.filter((x) => x.type === 'income').reduce((s, x) => s + Number(x.amount || 0), 0);
+        const expenseDay = items.filter((x) => x.type === 'expense').reduce((s, x) => s + Number(x.amount || 0), 0);
 
         return {
           title: dateKey,
           dayNumber: d.getDate(),
-          weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
-          incomeDay,
-          expenseDay,
-          data: items,
+          weekday: new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d),
+          incomeDay, expenseDay, data: items, alt: idx % 2 === 0,
         };
       });
 
     return sections;
-  }, [currentMonthTransactions]);
+  }, [currentMonthTransactions, locale]);
 
   const { incomeDay, expenseDay } = getDailyTotals(new Date());
 
   const getRemainingForCategory = useCallback((categoryName) => {
     const name = categoryName || 'Other';
-    const cat = categories.find(c => c.name === name);
+    const cat = categories.find((c) => c.name === name);
     if (!cat || typeof cat.budget_limit !== 'number') return null;
 
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const spent = transactions
-      .filter(t =>
-        t.type === 'expense' &&
-        (t.category || 'Other') === name &&
-        (t.date ? new Date(`${t.date}T00:00:00`) : new Date()) >= start
-      )
+      .filter((t) => t.type === 'expense' && (t.category || 'Other') === name && (t.date ? new Date(`${t.date}T00:00:00`) : new Date()) >= start)
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-    return (cat.budget_limit - spent);
+    return cat.budget_limit - spent;
   }, [categories, transactions]);
 
   /* --------------------------- Permissions / SMS --------------------------- */
+  const readBankMessages = useCallback(async () => {
+    if (Platform.OS !== 'android' || !SmsAndroid) return;
+    const existingBodies = new Set(transactions.map((t) => t.description));
+    let inserted = 0;
+
+    const bankSenders = ['COMBANK','CMB','HNB','SAMPATH','BOC','PEOPLES','PB','NDB','SEYLAN','DFCC','NTB','AMEX','NTBAMEX','PABC','PAN ASIA','PANASIA','UNION','UB','UBL','HSBC','SCB','STANDARDCHARTERED','NSB','CARGILLS'];
+
+    try {
+      for (const sender of bankSenders) {
+        const filter = { box: 'inbox', address: sender, maxCount: 50 };
+        await new Promise((resolve) => {
+          SmsAndroid.list(
+            JSON.stringify(filter),
+            () => resolve(),
+            async (_count, smsList) => {
+              let messages = []; try { messages = JSON.parse(smsList) ?? []; } catch { resolve(); return; }
+              for (const msg of messages) {
+                const parsed = parseBankSMS(msg.body);
+                if (!parsed) continue;
+                if (existingBodies.has(msg.body)) continue;
+
+                await handleTransactionAdded({
+                  type: parsed.type, category: parsed.category, merchant: parsed.merchant,
+                  amount: parsed.amount, description: msg.body, account: parsed.account, date: ymdLocal(new Date()),
+                });
+
+                existingBodies.add(msg.body); inserted += 1;
+              }
+              resolve();
+            }
+          );
+        });
+      }
+      if (inserted > 0) {
+        setImportedFromSMS((prev) => prev + inserted);
+        safeAlert(t('home.sms.title', 'SMS import'), t('home.sms.imported', { count: inserted }));
+      }
+    } catch (e) {
+      console.error('[SMS] Fatal error:', e);
+    }
+  }, [transactions, handleTransactionAdded, safeAlert, t]);
+
   const requestSMSPermission = useCallback(async () => {
     if (Platform.OS !== 'android' || !SmsAndroid) return;
     try {
@@ -749,167 +543,33 @@ export default function TransactionsScreen({ onBack, onLogout }) {
           buttonPositive: 'OK',
         }
       );
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-        await readBankMessages();
-      } else {
-        console.log('SMS permission denied');
-      }
-    } catch (err) {
-      console.warn(err);
-    }
+      if (granted === PermissionsAndroid.RESULTS.GRANTED) await readBankMessages();
+    } catch (err) { console.warn(err); }
   }, [readBankMessages]);
 
-  const readBankMessages = useCallback(async () => {
-    if (Platform.OS !== 'android' || !SmsAndroid) return;
-
-    const existingBodies = new Set(transactions.map(t => t.description));
-    let inserted = 0;
-
-    const bankSenders = [
-      'COMBANK', 'CMB', 'HNB', 'SAMPATH', 'BOC', 'PEOPLES', 'PB', 'NDB', 'SEYLAN',
-      'DFCC', 'NTB', 'AMEX', 'NTBAMEX', 'PABC', 'PAN ASIA', 'PANASIA', 'UNION',
-      'UB', 'UBL', 'HSBC', 'SCB', 'STANDARDCHARTERED', 'NSB', 'CARGILLS'
-    ];
-
-    try {
-      for (const sender of bankSenders) {
-        const filter = { box: 'inbox', address: sender, maxCount: 50 };
-
-        await new Promise((resolve) => {
-          SmsAndroid.list(
-            JSON.stringify(filter),
-            (fail) => {
-              console.error(`Failed to list SMS from ${sender}:`, fail);
-              resolve();
-            },
-            async (count, smsList) => {
-              let messages = [];
-              try {
-                messages = JSON.parse(smsList) ?? [];
-              } catch (e) {
-                console.error('[SMS] Failed to parse smsList JSON:', e);
-                resolve();
-                return;
-              }
-
-              for (const msg of messages) {
-                try {
-                  const parsed = parseBankSMS(msg.body);
-                  if (!parsed) continue;
-
-                  if (existingBodies.has(msg.body)) continue;
-
-                  await handleTransactionAdded({
-                    type: parsed.type,
-                    category: parsed.category,
-                    merchant: parsed.merchant,
-                    amount: parsed.amount,
-                    description: msg.body,
-                    account: parsed.account,
-                    date: ymdLocal(new Date()),
-                  });
-
-                  existingBodies.add(msg.body);
-                  inserted += 1;
-                } catch (e) {
-                  console.error('[SMS] Error handling a message:', e);
-                }
-              }
-
-              resolve();
-            }
-          );
-        });
-      }
-
-      if (inserted > 0) {
-        setImportedFromSMS((prev) => prev + inserted);
-        safeAlert('SMS import', `${inserted} new transaction${inserted > 1 ? 's' : ''} imported`);
-      }
-    } catch (e) {
-      console.error('[SMS] Fatal error:', e);
-    }
-  }, [transactions, handleTransactionAdded, safeAlert]);
-
   const handleManualSmsImport = () => {
-    if (!smsText.trim()) {
-      safeAlert('Error', 'Please enter the SMS text.');
-      return;
-    }
+    if (!smsText.trim()) { safeAlert(t('common.error'), t('home.sms.enterText', 'Please enter the SMS text.')); return; }
     const parsed = parseBankSMS(smsText);
-    if (!parsed) {
-      safeAlert('Error', 'Could not parse SMS text.');
-      return;
-    }
+    if (!parsed) { safeAlert(t('common.error'), t('home.sms.parseFail', 'Could not parse SMS text.')); return; }
     handleTransactionAdded({
-      type: parsed.type,
-      category: parsed.category,
-      merchant: parsed.merchant,
-      amount: parsed.amount,
-      description: smsText,
-      account: parsed.account,
-      date: ymdLocal(new Date()),
+      type: parsed.type, category: parsed.category, merchant: parsed.merchant,
+      amount: parsed.amount, description: smsText, account: parsed.account, date: ymdLocal(new Date()),
     });
     setSmsText('');
   };
 
-  useEffect(() => {
-    fetchTransactions();
-    fetchCategories();
-    if (Platform.OS === 'android') requestSMSPermission();
-  }, []);
+  useEffect(() => { fetchTransactions(); fetchCategories(); if (Platform.OS === 'android') requestSMSPermission(); }, []);
+  useEffect(() => { calculateMonthTotals(transactions); }, [transactions, calculateMonthTotals]);
+  useEffect(() => { if (selectedTab === 'monthly') generateMonthlyData(); }, [selectedTab, transactions, currentYear, generateMonthlyData, lang]);
 
-  useEffect(() => {
-    calculateMonthTotals(transactions);
-  }, [transactions, calculateMonthTotals]);
-
-  useEffect(() => {
-    if (selectedTab === 'Monthly') {
-      generateMonthlyData();
-    }
-  }, [selectedTab, transactions, currentYear, generateMonthlyData]);
-
-  const toggleMoreMenu = () => setIsMoreMenuOpen(!isMoreMenuOpen);
-  const closeMoreMenu = () => setIsMoreMenuOpen(false);
-
-  const handleLogout = async () => {
-    closeMoreMenu();
-
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Logout error:', error.message);
-      return;
-    }
-
-    if (onLogout) onLogout();
-  };
+  const toggleMoreMenu = () => setIsMoreMenuOpen((x)=>!x);
+  const closeMoreMenu  = () => setIsMoreMenuOpen(false);
+  const handleLogout = async () => { closeMoreMenu(); const { error } = await supabase.auth.signOut(); if (!error) onLogout?.(); };
 
   const getCategoryIcon = (categoryName) => {
     const name = categoryName || 'Other';
-    const category = categories.find(cat => cat.name === name);
+    const category = categories.find((cat) => cat.name === name);
     return category?.icon || '💳';
-  };
-
-  const handleDelete = async (tx) => {
-    try {
-      const { error } = await supabase.rpc('delete_transaction', {
-        t_type: tx.type,
-        t_id: tx.id,
-      });
-      if (error) throw error;
-    } catch (e) {
-      console.error(e);
-      safeAlert('Delete failed', e.message);
-    } finally {
-      setShowActions(false);
-      await fetchTransactions();
-    }
-  };
-
-  const handleStartEdit = (tx) => {
-    setShowActions(false);
-    setEditTx(tx);
-    setShowTransactionForm(true);
   };
 
   const openTransactionDetails = (tx) => setSelectedTransaction(tx);
@@ -920,36 +580,21 @@ export default function TransactionsScreen({ onBack, onLogout }) {
     const amount = Number(item.amount) || 0;
     const displayCategory = item.category || 'Other';
     const categoryEmoji = getCategoryIcon(displayCategory);
-    const isFromSMS =
-      (item.payment_method && item.payment_method.toLowerCase() === 'bank') ||
-      item.source === 'sms';
+    const isFromSMS = (item.payment_method && item.payment_method.toLowerCase() === 'bank') || item.source === 'sms';
 
     const leftTitle = (() => {
-      const location =
-        item.note && item.note.startsWith('Location: ')
-          ? item.note.replace('Location: ', '')
-          : null;
-      return location
-        ? `${displayCategory} - ${location}`
-        : displayCategory;
+      const location = item.note && item.note.startsWith('Location: ') ? item.note.replace('Location: ', '') : null;
+      return location ? `${displayCategory} - ${location}` : displayCategory;
     })();
 
     return (
       <TouchableOpacity onPress={() => openTransactionDetails(item)}>
         <View style={styles.transactionItem}>
           <View style={styles.transactionLeft}>
-            <View style={styles.emojiContainer}>
-              <Text style={styles.categoryEmoji}>{categoryEmoji}</Text>
-            </View>
-
+            <View style={styles.emojiContainer}><Text style={styles.categoryEmoji}>{categoryEmoji}</Text></View>
             <View style={styles.transactionTextWrap}>
-              <Text
-                style={styles.transactionCategory}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {leftTitle}{' '}
-                {isFromSMS && <Text style={{ fontSize: 12, color: '#008080' }}>• SMS</Text>}
+              <Text style={styles.transactionCategory} numberOfLines={1} ellipsizeMode="tail">
+                {leftTitle} {isFromSMS && <Text style={{ fontSize: 12, color: '#008080' }}>• SMS</Text>}
               </Text>
               <Text style={styles.transactionMethod} numberOfLines={1} ellipsizeMode="tail">
                 {item.payment_method || 'Cash'}
@@ -958,26 +603,35 @@ export default function TransactionsScreen({ onBack, onLogout }) {
           </View>
 
           <View style={styles.rowRight}>
-            <Text
-              style={[
-                styles.transactionAmount,
-                { color: isIncome ? '#4CAF50' : '#FF5722' },
-              ]}
-            >
+            <Text style={[styles.transactionAmount, { color: isIncome ? '#4CAF50' : '#FF5722' }]}>
               Rs. {amount.toFixed(2)}
             </Text>
-
             <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.actionBtn} onPress={() => startEdit(item)}>
-                <Edit3 size={18} color="#9CA3AF" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionBtn} onPress={() => confirmDelete(item)}>
-                <Trash2 size={18} color="#9CA3AF" />
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionBtn} onPress={() => startEdit(item)}><Edit3 size={18} color="#9CA3AF" /></TouchableOpacity>
+              <TouchableOpacity style={styles.actionBtn} onPress={() => confirmDelete(item)}><Trash2 size={18} color="#9CA3AF" /></TouchableOpacity>
             </View>
           </View>
         </View>
       </TouchableOpacity>
+    );
+  };
+
+  const renderSectionHeader = ({ section }) => {
+    const [year, month, day] = section.title.split('-');
+    const d = new Date(Number(year), Number(month) - 1, Number(day));
+    const headerStyle = section.alt ? styles.dayHeaderAltA : styles.dayHeaderAltB;
+
+    return (
+      <View style={[styles.dayHeader, headerStyle]}>
+        <View style={styles.dayHeaderLeft}>
+          <Text style={styles.dayNumber}>{d.getDate()}</Text>
+          <Text style={styles.dayLabel}>{new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d)}</Text>
+        </View>
+        <View style={styles.dayHeaderRight}>
+          <View style={styles.badgeIncome}><Text style={styles.badgeText}>+ Rs. {section.incomeDay.toFixed(2)}</Text></View>
+          <View style={styles.badgeExpense}><Text style={styles.badgeText}>- Rs. {section.expenseDay.toFixed(2)}</Text></View>
+        </View>
+      </View>
     );
   };
 
@@ -988,54 +642,22 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         <Text style={styles.monthDateRange}>{item.dateRange}</Text>
       </View>
       <View style={styles.monthlyAmounts}>
-        <Text style={styles.monthlyIncome}>Rs. {item.income.toFixed(2)}</Text>
-        <Text style={styles.monthlyExpense}>Rs. {item.expenses.toFixed(2)}</Text>
-        <Text style={[styles.monthlyTotal, { color: item.total >= 0 ? '#4CAF50' : '#FF5722' }]}>
-          Rs. {item.total.toFixed(2)}
-        </Text>
+        <Text style={styles.monthlyIncome}>+ Rs. {item.income.toFixed(2)}</Text>
+        <Text style={styles.monthlyExpense}>- Rs. {item.expenses.toFixed(2)}</Text>
+        <Text style={styles.monthlyTotal}>Rs. {item.total.toFixed(2)}</Text>
       </View>
     </View>
   );
 
-  const renderSectionHeader = ({ section, index }) => {
-    const [year, month, day] = section.title.split('-');
-    const sectionDate = new Date(Number(year), Number(month) - 1, Number(day));
-    const dayNumber = sectionDate.getDate();
-    const weekday = sectionDate.toLocaleDateString('en-US', { weekday: 'short' });
-
-    const headerStyle = index % 2 === 0 ? styles.dayHeaderAltA : styles.dayHeaderAltB;
-    return (
-      <View style={[styles.dayHeader, headerStyle]}>
-        <View style={styles.dayHeaderLeft}>
-          <Text style={styles.dayNumber}>{dayNumber}</Text>
-          <Text style={styles.dayLabel}>{weekday}</Text>
-        </View>
-
-        <View style={styles.dayHeaderRight}>
-          <View style={styles.badgeIncome}>
-            <Text style={styles.badgeText}>+ Rs. {section.incomeDay.toFixed(2)}</Text>
-          </View>
-          <View style={styles.badgeExpense}>
-            <Text style={styles.badgeText}>- Rs. {section.expenseDay.toFixed(2)}</Text>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#008080" />
+      <StatusBar barStyle="light-content" backgroundColor="#008080" />
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity>
-          <Ionicons name="search" size={24} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Transactions</Text>
+        <TouchableOpacity><Ionicons name="search" size={24} color="white" /></TouchableOpacity>
+        <Text style={styles.headerTitle}>{t('tx.title')}</Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Ionicons name="options" size={24} color="white" />
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIcon}><Ionicons name="options" size={24} color="white" /></TouchableOpacity>
         </View>
       </View>
 
@@ -1043,92 +665,54 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       <View style={styles.tabContainer}>
         {tabs.map((tab) => (
           <TouchableOpacity
-            key={tab}
-            style={[styles.tab, selectedTab === tab && styles.activeTab]}
-            onPress={() => setSelectedTab(tab)}
+            key={tab.key}
+            style={[styles.tab, selectedTab === tab.key && styles.activeTab]}
+            onPress={() => setSelectedTab(tab.key)}
           >
-            <Text style={[styles.tabText, selectedTab === tab && styles.activeTabText]}>
-              {tab}
-            </Text>
+            <Text style={[styles.tabText, selectedTab === tab.key && styles.activeTabText]}>{tab.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Summary inline (clickable) */}
+      {/* Summary inline (clickable filter) */}
       <View style={styles.summaryInline}>
-        <TouchableOpacity
-          style={styles.summaryInlineItem}
-          onPress={() => setTypeFilter('income')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.summaryInlineLabel}>Income</Text>
-          <Text
-            style={[
-              styles.summaryInlineValue,
-              { color: '#007AFF' },
-              typeFilter === 'income' && { textDecorationLine: 'underline' },
-            ]}
-          >
+        <TouchableOpacity style={styles.summaryInlineItem} onPress={() => setTypeFilter('income')} activeOpacity={0.8}>
+          <Text style={styles.summaryInlineLabel}>{t('tx.inline.income')}</Text>
+          <Text style={[styles.summaryInlineValue, { color: '#007AFF' }, typeFilter === 'income' && { textDecorationLine: 'underline' }]}>
             {income.toFixed(2)}
           </Text>
         </TouchableOpacity>
 
         <View style={styles.summaryInlineDivider} />
 
-        <TouchableOpacity
-          style={styles.summaryInlineItem}
-          onPress={() => setTypeFilter('expense')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.summaryInlineLabel}>Expense</Text>
-          <Text
-            style={[
-              styles.summaryInlineValue,
-              { color: '#FF3B30' },
-              typeFilter === 'expense' && { textDecorationLine: 'underline' },
-            ]}
-          >
+        <TouchableOpacity style={styles.summaryInlineItem} onPress={() => setTypeFilter('expense')} activeOpacity={0.8}>
+          <Text style={styles.summaryInlineLabel}>{t('tx.inline.expense')}</Text>
+          <Text style={[styles.summaryInlineValue, { color: '#FF3B30' }, typeFilter === 'expense' && { textDecorationLine: 'underline' }]}>
             {expenses.toFixed(2)}
           </Text>
         </TouchableOpacity>
 
         <View style={styles.summaryInlineDivider} />
 
-        <TouchableOpacity
-          style={styles.summaryInlineItem}
-          onPress={() => setTypeFilter('all')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.summaryInlineLabel}>Total</Text>
-          <Text
-            style={[
-              styles.summaryInlineValue,
-              typeFilter === 'all' && { textDecorationLine: 'underline' },
-            ]}
-          >
+        <TouchableOpacity style={styles.summaryInlineItem} onPress={() => setTypeFilter('all')} activeOpacity={0.8}>
+          <Text style={styles.summaryInlineLabel}>{t('tx.inline.total')}</Text>
+          <Text style={[styles.summaryInlineValue, typeFilter === 'all' && { textDecorationLine: 'underline' }]}>
             {(income - expenses).toFixed(2)}
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* Content */}
-      {selectedTab === 'Monthly' ? (
+      {selectedTab === 'monthly' ? (
         <View style={styles.monthlyContainer}>
-          <FlatList
-            data={monthlyData}
-            renderItem={renderMonthlyItem}
-            keyExtractor={(item) => item.month}
-            showsVerticalScrollIndicator={false}
-          />
+          <FlatList data={monthlyData} renderItem={renderMonthlyItem} keyExtractor={(item, idx) => `${item.month}-${idx}`} showsVerticalScrollIndicator={false} />
         </View>
-      ) : selectedTab === 'Daily' ? (
+      ) : selectedTab === 'daily' ? (
         <View style={styles.transactionsContainer}>
           {dailySections.length === 0 ? (
             <View style={styles.placeholderContainer}>
-              <Text style={styles.placeholderText}>No transactions this month</Text>
-              <Text style={styles.placeholderSubtext}>
-                Add one using the + button below
-              </Text>
+              <Text style={styles.placeholderText}>{t('tx.empty.title')}</Text>
+              <Text style={styles.placeholderSubtext}>{t('tx.empty.subtitle')}</Text>
             </View>
           ) : (
             <SectionList
@@ -1144,19 +728,13 @@ export default function TransactionsScreen({ onBack, onLogout }) {
         </View>
       ) : (
         <View style={styles.placeholderContainer}>
-          <Text style={styles.placeholderText}>Summary</Text>
+          <Text style={styles.placeholderText}>{t('tx.tabs.summary')}</Text>
           <Text style={styles.placeholderSubtext}>Build your summary view here</Text>
         </View>
       )}
 
       {/* FAB */}
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => {
-          setEditTx(null);
-          setShowTransactionForm(true);
-        }}
-      >
+      <TouchableOpacity style={styles.addButton} onPress={() => { setEditTx(null); setShowTransactionForm(true); }}>
         <Ionicons name="add" size={30} color="white" />
       </TouchableOpacity>
 
@@ -1173,71 +751,33 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       />
 
       {/* Transaction Details Modal */}
-      <Modal
-        visible={!!selectedTransaction}
-        transparent
-        animationType="fade"
-        onRequestClose={closeTransactionDetails}
-      >
+      <Modal visible={!!selectedTransaction} transparent animationType="fade" onRequestClose={closeTransactionDetails}>
         <View style={styles.detailsOverlay}>
           <View style={styles.detailsCard}>
-            <Text style={styles.detailsTitle}>Transaction Details</Text>
+            <Text style={styles.detailsTitle}>{t('tx.details.title')}</Text>
 
-            <Text style={styles.detailLine}>
-              <Text style={styles.detailLabel}>Category: </Text>
-              {(selectedTransaction?.category || 'Other')}
-            </Text>
-
-            <Text style={styles.detailLine}>
-              <Text style={styles.detailLabel}>Amount: </Text>
-              Rs. {Number(selectedTransaction?.amount || 0).toFixed(2)}
-            </Text>
-
-            <Text style={styles.detailLine}>
-              <Text style={styles.detailLabel}>Type: </Text>
-              {selectedTransaction?.type}
-            </Text>
-
-            <Text style={styles.detailLine}>
-              <Text style={styles.detailLabel}>Payment Method: </Text>
-              {selectedTransaction?.payment_method || 'Cash'}
-            </Text>
-
-            <Text style={styles.detailLine}>
-              <Text style={styles.detailLabel}>Date: </Text>
-              {selectedTransaction?.date ?? '-'}
-            </Text>
+            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.category')}: </Text>{selectedTransaction?.category || 'Other'}</Text>
+            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.amount')}: </Text>Rs. {Number(selectedTransaction?.amount || 0).toFixed(2)}</Text>
+            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.type')}: </Text>{selectedTransaction?.type}</Text>
+            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.paymentMethod')}: </Text>{selectedTransaction?.payment_method || 'Cash'}</Text>
+            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.date')}: </Text>{selectedTransaction?.date ?? '-'}</Text>
 
             {selectedTransaction?.description ? (
-              <Text style={styles.detailLine}>
-                <Text style={styles.detailLabel}>Description: </Text>
-                {selectedTransaction.description}
-              </Text>
+              <Text style={styles.detailLine}><Text style={styles.detailLabel}>Description: </Text>{selectedTransaction.description}</Text>
             ) : null}
 
             {selectedTransaction?.note ? (
-              <Text style={styles.detailLine}>
-                <Text style={styles.detailLabel}>Note: </Text>
-                {selectedTransaction.note}
-              </Text>
+              <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.note')}: </Text>{selectedTransaction.note}</Text>
             ) : null}
 
             {selectedTransaction?.category ? (() => {
               const rem = getRemainingForCategory(selectedTransaction.category);
               if (rem == null) return null;
-              return (
-                <Text style={styles.detailLine}>
-                  <Text style={styles.detailLabel}>Remaining (this month): </Text>
-                  Rs. {rem.toFixed(2)}
-                </Text>
-              );
+              return <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.remaining')}: </Text>Rs. {rem.toFixed(2)}</Text>;
             })() : null}
 
-            <TouchableOpacity
-              style={styles.detailsCloseBtn}
-              onPress={closeTransactionDetails}
-            >
-              <Text style={{ color: 'white' }}>Close</Text>
+            <TouchableOpacity style={styles.detailsCloseBtn} onPress={closeTransactionDetails}>
+              <Text style={{ color: 'white' }}>{t('common.close')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1246,178 +786,51 @@ export default function TransactionsScreen({ onBack, onLogout }) {
       {/* Bottom Nav */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]} onPress={onBack}>
-          <Home size={24} color="white" />
-          <Text style={styles.navText}>Home</Text>
+          <Home size={24} color="white" /><Text style={styles.navText}>{t('nav.home')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.navItem}>
-          <DollarSign size={24} color="white" />
-          <Text style={styles.navText}>Transactions</Text>
+          <DollarSign size={24} color="white" /><Text style={styles.navText}>{t('nav.transactions')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]}>
-          <Wallet size={24} color="white" />
-          <Text style={styles.navText}>Accounts</Text>
+          <Wallet size={24} color="white" /><Text style={styles.navText}>{t('nav.accounts')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.navItem, styles.navItemInactive]} onPress={toggleMoreMenu}>
-          <MoreHorizontal size={24} color="white" />
-          <Text style={styles.navText}>More</Text>
+          <MoreHorizontal size={24} color="white" /><Text style={styles.navText}>{t('nav.more')}</Text>
         </TouchableOpacity>
       </View>
 
       {/* More Menu */}
-      <MoreMenu isOpen={isMoreMenuOpen} onClose={closeMoreMenu} onLogout={handleLogout} />
-
-      {/* Action Sheet */}
-      <Modal
-        transparent
-        visible={showActions}
-        animationType="fade"
-        onRequestClose={() => setShowActions(false)}
-      >
-        <TouchableOpacity
-          style={styles.actionsOverlay}
-          activeOpacity={1}
-          onPress={() => setShowActions(false)}
-        >
-          <View style={styles.actionsSheet}>
-            <TouchableOpacity style={styles.actionBtnSheet} onPress={() => handleStartEdit(actionTx)}>
-              <Text style={styles.actionEdit}>Edit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionBtnSheet} onPress={() => handleDelete(actionTx)}>
-              <Text style={styles.actionDelete}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      <MoreMenu isOpen={isMoreMenuOpen} onClose={closeMoreMenu} onLogout={handleLogout} navigation={navigation} />
     </SafeAreaView>
   );
 }
 
-
-
 /* --------------------------------- styles --------------------------------- */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingTop: 25,
-    paddingBottom: 15,
-    backgroundColor: '#008080',
-  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, paddingTop: 25, paddingBottom: 15, backgroundColor: '#008080' },
   headerTitle: { fontSize: 20, marginLeft: 10, fontWeight: '600', color: 'white' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerIcon: { marginLeft: 15 },
 
-  dateContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#008080',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#008080',
-  },
-  dateText: { color: 'white', fontSize: 18, fontWeight: '500', marginHorizontal: 20 },
-
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#008080',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
+  tabContainer: { flexDirection: 'row', backgroundColor: '#008080', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   activeTab: { borderBottomWidth: 2, borderBottomColor: 'white' },
   tabText: { color: '#D3D3D3', fontSize: 12, fontWeight: '500' },
   activeTabText: { color: 'white' },
-  
-  
-  
- 
 
-  // Update existing summary styles
   summaryInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', marginHorizontal: 16, marginTop: 8, marginBottom: 12,
+    paddingVertical: 16, paddingHorizontal: 16, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1, shadowRadius: 3, elevation: 2, borderWidth: 1, borderColor: '#F3F4F6',
   },
-
-  summaryInlineItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-
-  summaryInlineDivider: {
-    width: 1,
-    height: 32,
-    backgroundColor: '#E5E7EB',
-  },
-
-  summaryInlineLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-    fontWeight: '500',
-  },
-
-  summaryInlineValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  summaryInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  summaryInlineItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  summaryInlineDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: '#e0e0e0',
-  },
-  summaryInlineLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 2,
-  },
-  summaryInlineValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
+  summaryInlineItem: { flex: 1, alignItems: 'center' },
+  summaryInlineDivider: { width: 1, height: 32, backgroundColor: '#E5E7EB' },
+  summaryInlineLabel: { fontSize: 12, color: '#6B7280', marginBottom: 4, fontWeight: '500' },
+  summaryInlineValue: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
 
   monthlyContainer: { flex: 1, backgroundColor: 'white', paddingHorizontal: 20 },
-  monthlyItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
+  monthlyItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   monthlyLeft: { flex: 1 },
   monthName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   monthDateRange: { fontSize: 12, color: '#666', marginTop: 2 },
@@ -1428,66 +841,20 @@ const styles = StyleSheet.create({
 
   transactionsContainer: { flex: 1, backgroundColor: 'white', paddingHorizontal: 0 },
 
-  dayHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  dayHeaderAltA: {
-    backgroundColor: '#F0FFFD',
-  },
-  dayHeaderAltB: {
-    backgroundColor: '#F9FFFC',
-  },
+  dayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10 },
+  dayHeaderAltA: { backgroundColor: '#F0FFFD' },
+  dayHeaderAltB: { backgroundColor: '#F9FFFC' },
   dayHeaderLeft: { flexDirection: 'row', alignItems: 'center' },
   dayNumber: { fontSize: 18, fontWeight: 'bold', color: '#333', marginRight: 8 },
-  dayLabel: {
-    fontSize: 12,
-    color: 'white',
-    backgroundColor: '#FF3B30',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
+  dayLabel: { fontSize: 12, color: 'white', backgroundColor: '#FF3B30', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, overflow: 'hidden' },
   dayHeaderRight: { flexDirection: 'row', alignItems: 'center' },
-  badgeIncome: {
-    backgroundColor: '#E6F4EA',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginRight: 6,
-  },
-  badgeExpense: {
-    backgroundColor: '#FDECEA',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
+  badgeIncome: { backgroundColor: '#E6F4EA', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginRight: 6 },
+  badgeExpense: { backgroundColor: '#FDECEA', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   badgeText: { fontSize: 12, fontWeight: '600', color: '#333' },
 
-  transactionItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    backgroundColor: 'white',
-  },
+  transactionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: 'white' },
   transactionLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
-  emojiContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
+  emojiContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f8f9fa', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   categoryEmoji: { fontSize: 20 },
   transactionTextWrap: { flex: 1, minWidth: 0 },
   transactionCategory: { fontSize: 16, fontWeight: '500', color: '#333', flexShrink: 1 },
@@ -1495,83 +862,30 @@ const styles = StyleSheet.create({
   rowRight: { alignItems: 'flex-end', marginLeft: 8, minWidth: 90 },
   transactionAmount: { fontSize: 16, fontWeight: '500' },
 
-  addButton: {
-    position: 'absolute',
-    bottom: 100,
-    right: 20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#F87171',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
+  addButton: { position: 'absolute', bottom: 100, right: 20, width: 60, height: 60, borderRadius: 30, backgroundColor: '#F87171', justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
 
   placeholderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   placeholderText: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   placeholderSubtext: { fontSize: 14, color: '#666' },
 
-  bottomNav: {
-    backgroundColor: '#008080',
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 16,
-  },
+  bottomNav: { backgroundColor: '#008080', flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16 },
   navItem: { alignItems: 'center' },
   navItemInactive: { opacity: 0.7 },
   navText: { color: 'white', fontSize: 12, marginTop: 4 },
 
-  moreModalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
+  moreModalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   moreBackdrop: { flex: 1 },
-  moreMenu: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
+  moreMenu: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%', shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
   moreMenuContent: { padding: 24 },
-  moreMenuHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 32,
-  },
+  moreMenuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 },
   profileSection: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  profileImage: {
-    width: 48,
-    height: 48,
-    backgroundColor: '#008080',
-    borderRadius: 24,
-    overflow: 'hidden',
-    marginRight: 12,
-  },
+  profileImage: { width: 48, height: 48, backgroundColor: '#008080', borderRadius: 24, overflow: 'hidden', marginRight: 12 },
   profileImageContent: { width: '100%', height: '100%' },
   profileName: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
   profileEmail: { fontSize: 14, color: '#6B7280' },
   closeButton: { padding: 8 },
   menuItems: { flex: 1 },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 4,
-  },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 8, borderRadius: 8, marginBottom: 4 },
   menuIcon: { marginRight: 16 },
   menuItemContent: { flex: 1 },
   menuItemTitle: { fontSize: 16, fontWeight: '500', color: '#1F2937' },
@@ -1579,43 +893,13 @@ const styles = StyleSheet.create({
   logoutItem: { marginTop: 32, backgroundColor: '#FEF2F2' },
   logoutText: { fontSize: 16, fontWeight: '500', color: '#EF4444' },
 
-  actionsOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'flex-end',
-  },
-  actionsSheet: {
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
   actionsRow: { flexDirection: 'row', marginTop: 6 },
   actionBtn: { paddingHorizontal: 6 },
-  actionBtnSheet: { paddingVertical: 16, alignItems: 'center' },
-  actionEdit: { color: '#008080', fontSize: 16, fontWeight: '600' },
-  actionDelete: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
 
-  detailsOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  detailsCard: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderRadius: 10,
-    width: '90%',
-  },
+  detailsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  detailsCard: { backgroundColor: 'white', padding: 20, borderRadius: 10, width: '90%' },
   detailsTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
   detailLine: { marginTop: 6, lineHeight: 20, color: '#333' },
   detailLabel: { fontWeight: '600' },
-  detailsCloseBtn: {
-    marginTop: 16,
-    backgroundColor: '#008080',
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
+  detailsCloseBtn: { marginTop: 16, backgroundColor: '#008080', padding: 10, borderRadius: 8, alignItems: 'center' },
 });
