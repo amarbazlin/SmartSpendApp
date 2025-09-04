@@ -20,3 +20,10 @@
     "production": {}
   }
 }
+
+
+
+Create following CloudFormation templates and test them.
+Task 1: Set up a secure EC2 instance that allows SSH and https access only from a specific IP address. The stack must include an attached security group.
+Task 2: Create a simple static web hosting environment, with an HTTP server preconfigured on an EC2 instance, and specify the webpage content during stack creation.
+Task 3: Build a custom networking environment with distinct public and private subnets to host multiple applications within an isolated VPC.
