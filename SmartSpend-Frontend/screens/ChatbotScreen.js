@@ -25,94 +25,56 @@ function lkr(n) {
   return `Rs. ${Math.round(num).toLocaleString('en-LK')}`;
 }
 
-/** Strip ALL code blocks (fenced + indented) & JSON dumps from model text */
+/** Strip model junk */
 function sanitizeReply(t = '') {
   let out = String(t).replace(/\r\n/g, '\n');
 
-  // 1) Remove fenced code: ```...``` or ~~~...~~~
   out = out.replace(/```[\s\S]*?```/g, '');
   out = out.replace(/~~~[\s\S]*?~~~/g, '');
-
-  // 2) Remove INDENTED code blocks (>=4 spaces or a tab at line start)
   out = out.replace(/(?:^|\n)((?:[ \t]{4,}.*(?:\n|$))+)/g, '\n');
-
-  // 3) Remove obvious JSON blobs
   out = out.replace(/(^|\n)\s*[{[][\s\S]*?[\]}]\s*(?=\n|$)/g, (block) => {
     return /"[^"]+"\s*:/.test(block) ? '' : block;
   });
-
-  // 4) Unwrap inline `code`
   out = out.replace(/`([^`]+)`/g, '$1');
-
-  // 5) Kill hrules / separators
   out = out.replace(/^\s*[-*_]{3,}\s*$/gm, '');
 
-  // 6) Remove boilerplate/disclaimers
   const ban = [
     /summary in json/i,
     /json format/i,
-    /\bSUGGESTIONS\b/i,
-    /this is general guidance/i,
     /general guidance/i,
     /not financial advice/i,
-    /consult(ing)? (a )?financial advisor/i,
-    /educational purposes/i,
+    /benchmark/i,
   ];
   out = out
     .split(/\n+/)
     .filter((line) => !ban.some((rx) => rx.test(line)))
     .join('\n');
 
-  // 7) Clean empty bullets / excessive blank lines
-  out = out
-    .replace(/^\s*[-*]\s*$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  return out;
+  return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Beautify to readable markdown in EN/SI/TA */
-function beautifyMarkdown(t = '', lang = 'en', stepLabel = 'Step') {
+/** Beautify markdown */
+function beautifyMarkdown(t = '') {
   let out = sanitizeReply(t);
 
-  // Normalize bullets
+  // Normalize bullets & numbers
   out = out.replace(/^\s*•\s+/gm, '- ');
+  out = out.replace(/^\s*\d+\s*[\)\.]\s+/gm, (m) => {
+    const num = m.match(/\d+/)?.[0];
+    return num ? `${num}. ` : '- ';
+  });
 
-  // Convert "1) item" / "1. item" / "1 - item" to bullets (markdown ordered lists
-  // from the model are inconsistent in SI/TA)
-  out = out.replace(/^\s*\d+\s*[\)\.\-]\s+/gm, '- ');
+  // Merge broken lines in bullets
+  out = out.replace(/(\n[-\d]\.? [^\n]+)\n(\s+[^\n]+)/g, (_, a, b) => `${a} ${b.trim()}`);
 
-  // Bold currency & percentages (English/Sinhala/Tamil “Rs/LKR/රු/ரூ”)
+  // Bold Rs + %
   out = out.replace(/\b(?:LKR|Rs\.?|රු\.?|ரூ\.?)\s?\d[\d,]*(?:\.\d+)?\b/gi, (m) => `**${m}**`);
   out = out.replace(/\b\d{1,3}(?:\.\d+)?\s?%/g, (m) => `**${m}**`);
 
-  // Step headings: match Step / පියවර / படி but render with the localized label
-  const stepWords = ['Step', 'පියවර', 'படி'];
-  const stepRx = new RegExp(
-    `^\\s*\\*{0,2}(?:${stepWords.join('|')})\\s*(\\d+)\\s*[:\\-–—]\\s*(.+?)\\s*\\*{0,2}\\.?\\s*$`,
-    'i'
-  );
-
-  const lines = out.split('\n');
-  const outLines = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const m = line.match(stepRx);
-    if (m) {
-      const title = m[2].replace(/\*+$/,'').trim();
-      if (outLines.length && outLines[outLines.length - 1] !== '') outLines.push('');
-      outLines.push(`#### ${stepLabel} ${m[1]} — ${title}`);
-      outLines.push('');
-      continue;
-    }
-    outLines.push(line);
-  }
-  out = outLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  return out;
+  return out.trim();
 }
 
-/** Optional invisible primer; harmless if you don’t pass grounding */
+/** Invisible primer */
 function buildSystemPrimer(grounding) {
   const base = [
     `You are SmartSpend's Finance Assistant.`,
@@ -145,8 +107,8 @@ export default function ChatbotScreen() {
   const [messages, setMessages] = useState([{ role: 'assistant', content: intro }]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [plan, setPlan] = useState(null);
 
-  // refresh the intro bubble if user changes app language
   useEffect(() => {
     setMessages((msgs) => {
       if (msgs.length === 1 && msgs[0]?.role === 'assistant') {
@@ -154,15 +116,12 @@ export default function ChatbotScreen() {
       }
       return msgs;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i18n.language]);
 
-  // Send button sizing
   const [inputBoxHeight, setInputBoxHeight] = useState(46);
   const btnSize = Math.max(34, Math.min(40, Math.round(inputBoxHeight * 0.70)));
   const iconSize = Math.max(16, Math.min(20, Math.round(btnSize * 0.46)));
 
-  // localized quick prompts
   const quickPrompts = [
     t('chat.q1', { defaultValue: 'What should my monthly savings target be?' }),
     t('chat.q2', { defaultValue: 'How should I invest my surplus this month?' }),
@@ -187,10 +146,8 @@ export default function ChatbotScreen() {
       const sys = { role: 'system', content: buildSystemPrimer(grounding) };
       const payloadMessages = [sys, ...next];
 
-      // pick target language from current app language
       const appLng = (i18n.language || 'en').slice(0, 2);
       const targetLang = langMap[appLng] || 'English';
-      const stepLabel = t('chat.stepLabel', 'Step');
 
       const res = await askInvestAssistant({
         messages: payloadMessages,
@@ -198,10 +155,9 @@ export default function ChatbotScreen() {
         grounding,
       });
 
-      const cleaned = beautifyMarkdown(res?.message || '', i18n.language || 'en', stepLabel);
+      const cleaned = beautifyMarkdown(res?.message || '', i18n.language || 'en');
       setMessages([...next, { role: 'assistant', content: cleaned || 'No reply' }]);
 
-      // Only the two metrics we show
       const monthly = res?.suggestions?.monthly_savings_target_lkr ??
                       res?.snapshot?.rules?.monthly_savings_target_lkr;
       const buffer  = res?.suggestions?.emergency_buffer_lkr ??
@@ -228,8 +184,6 @@ export default function ChatbotScreen() {
     if (busy) return;
     send(p);
   }
-
-  const [plan, setPlan] = useState(null);
 
   function clearChat() {
     setMessages([{ role: 'assistant', content: intro }]);
@@ -305,16 +259,16 @@ export default function ChatbotScreen() {
       <FlatList
         ref={listRef}
         data={messages}
-        keyExtractor={(_, i) => String(i)}
+        keyExtractor={(item, i) => `${item.role}-${i}-${item.content.slice(0,20)}`}
         contentContainerStyle={{ padding: 12, gap: 10, paddingBottom: 12 }}
         renderItem={renderItem}
+        removeClippedSubviews={false}
         onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: true })}
         ListFooterComponent={() =>
           busy ? (
             TypingRow
           ) : (
             <Fragment>
-              {/* Plan highlights (no "Quick ways to save") */}
               {plan ? (
                 <View style={styles.tipsCard}>
                   <Text style={styles.tipsTitle}>
@@ -341,7 +295,6 @@ export default function ChatbotScreen() {
                 </View>
               ) : null}
 
-              {/* Quick prompts */}
               <View style={styles.quickStrip}>
                 {quickPrompts.map((p, idx) => (
                   <Pressable
@@ -404,10 +357,8 @@ export default function ChatbotScreen() {
 }
 
 const styles = StyleSheet.create({
-  // Background
   screen: { flex: 1, backgroundColor: '#F6FAFB' },
 
-  // Header
   header: {
     paddingTop: 12, paddingBottom: 10, paddingHorizontal: 10, backgroundColor: '#008081',
     borderBottomWidth: 1, borderBottomColor: '#E9D5FF', flexDirection: 'row', alignItems: 'center',
@@ -420,14 +371,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '800', color: '#E9D5FF' },
   subtitle: { fontSize: 12, color: '#FFFFFF', marginTop: 2 },
 
-  // “New Chat” pill
   clearBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 999, borderWidth: 1, borderColor: '#C4B5FD', backgroundColor: '#FFFFFF',
   },
   clearText: { color: '#4C1D95', fontWeight: '700' },
 
-  // Messages
   rowWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   bubble: {
     padding: 12, borderRadius: 16, maxWidth: '86%', shadowColor: '#000', shadowOpacity: 0.05,
@@ -438,13 +387,11 @@ const styles = StyleSheet.create({
   user: { alignSelf: 'flex-end', backgroundColor: '#ECFEFF', borderWidth: 1, borderColor: '#BFF0EA' },
   typingBubble: { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' },
 
-  // Avatars
   avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarCoach: { backgroundColor: '#FFFFFF' },
   avatarUser: { backgroundColor: '#DBEAFE' },
   avatarImage: { width: 28, height: 28, borderRadius: 14 },
 
-  // Snapshot card
   tipsCard: { marginTop: 8, padding: 14, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', gap: 10 },
   tipsTitle: { fontWeight: '800', color: '#0B1220', marginBottom: 2 },
   statPill: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
@@ -453,12 +400,10 @@ const styles = StyleSheet.create({
   statLabel: { color: '#334155', fontWeight: '700' },
   statValue: { color: '#0B1220', fontWeight: '800' },
 
-  // Quick prompts — centered
   quickStrip: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 10 },
   chip: { backgroundColor: '#E7F0FF', borderColor: '#BBD6FE', borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1 },
   chipText: { color: '#0B1220', fontWeight: '700', fontSize: 12 },
 
-  // Composer
   composerWrap: { backgroundColor: '#F6FAFB', borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   inputWrap: {
     flex: 1, borderWidth: 1, borderColor: '#6D28D9', borderRadius: 14, backgroundColor: '#F3E8FF',
@@ -467,7 +412,6 @@ const styles = StyleSheet.create({
   },
   input: { minHeight: 40, maxHeight: 140, fontSize: 14, color: '#0B1220' },
 
-  // Send button — circular, subtle shadow, deep blue-green
   sendBtn: {
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#022D36',
     borderWidth: 1, borderColor: '#001A1F', shadowColor: '#000', shadowOpacity: 0.16,
@@ -476,77 +420,41 @@ const styles = StyleSheet.create({
   sendBtnPressed: { backgroundColor: '#01242A', borderColor: '#001319', transform: [{ scale: 0.98 }] },
 });
 
-/* Markdown theme tuned for readable steps & lists */
 const mdStyles = {
-  body: { color: '#0B1220', fontSize: 14, lineHeight: 21 },
+  body: { color: '#0B1220', fontSize: 15, lineHeight: 22 },
   text: { color: '#0B1220' },
   paragraph: { marginTop: 0, marginBottom: 10 },
+  strong: { fontWeight: '800', color: '#0B1220' },
 
-  heading1: { fontSize: 18, fontWeight: '800', color: '#0B1220', marginTop: 10, marginBottom: 8 },
+  bullet_list: { marginVertical: 6, paddingLeft: 18 },
+  ordered_list: { marginVertical: 6, paddingLeft: 18 },
+  list_item: { flexDirection: 'row', marginBottom: 6 },
+
+  bullet_list_icon: { color: '#1E3A8A' },
+  ordered_list_icon: { color: '#1E3A8A' },
+
+  heading1: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1E3A8A',           // Deep blue heading
+    marginTop: 12,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderColor: '#93C5FD',
+    backgroundColor: '#EFF6FF',
+    padding: 6,
+    borderRadius: 4,
+  },
   heading2: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#0B1220',
-    marginTop: 12,
-    marginBottom: 8,
-    backgroundColor: '#F3E8FF',
-    borderColor: '#C4B5FD',
-    borderLeftWidth: 4,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    color: '#1E40AF',           // Darker blue for sub-headings
+    marginTop: 10,
+    marginBottom: 6,
+    borderLeftWidth: 3,
+    borderColor: '#BFDBFE',
+    backgroundColor: '#EFF6FF',
+    padding: 6,
+    borderRadius: 4,
   },
-  heading3: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0B1220',
-    marginTop: 12,
-    marginBottom: 8,
-    backgroundColor: '#F0FDFA',
-    borderColor: '#BFF0EA',
-    borderLeftWidth: 4,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-  },
-  heading4: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0B1220',
-    marginTop: 12,
-    marginBottom: 8,
-    backgroundColor: '#F0FDFA',
-    borderColor: '#BFF0EA',
-    borderLeftWidth: 4,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-  },
-
-  strong: { fontWeight: '800', color: '#0B1220' },
-
-  bullet_list: { marginTop: 4, marginBottom: 10 },
-  ordered_list: { marginTop: 4, marginBottom: 10 },
-  list_item: { flexDirection: 'row', marginBottom: 8 },
-  bullet_list_icon: { color: '#0B1220' },
-  ordered_list_icon: { color: '#0B1220' },
-
-  code_inline: { display: 'none' },  // defensive: hide if any slips through
-  code_block: { display: 'none' },
-  fence: { display: 'none' },
-
-  link: { color: '#2563EB' },
-
-  table: { borderColor: '#E5E7EB', borderWidth: 1, borderRadius: 8, marginVertical: 10 },
-  th: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#E5E7EB',
-    borderWidth: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    fontWeight: '800',
-    color: '#0B1220',
-  },
-  tr: { borderColor: '#E5E7EB', borderBottomWidth: 1 },
-  td: { borderColor: '#E5E7EB', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 8 },
 };
