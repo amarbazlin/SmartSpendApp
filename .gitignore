@@ -105,8 +105,11 @@ pip-wheel-metadata/
 # Backend logs
 SmartSpend-Backend/*.log
 
-# (Optional) model artifacts — remove if you want to version them
+# (Optional) model artifacts — keep ignoring all, but allow budget_model.pkl
 SmartSpend-Backend/*.joblib
 SmartSpend-Backend/*.pkl
 SmartSpend-Backend/models/*.joblib
 SmartSpend-Backend/models/*.pkl
+
+# Explicitly include budget_model.pkl
+!SmartSpend-Backend/budget_model.pkl
