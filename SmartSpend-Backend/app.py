@@ -87,24 +87,18 @@ def is_invalid_message(msg: str) -> bool:
 
 # ---------- Finance intent check ----------
 FINANCE_KEYWORDS = [
-    # English
     "save", "saving", "savings",
     "invest", "investment", "investing",
     "expense", "spending", "budget", "debt",
     "income", "salary", "loan", "finance", "financial",
     "target", "goal", "money",
-
-    # Sinhala
     "මුදල්", "ඉතුරුම්", "ඉතුරුම් කිරීම", "වැය", "වියදම්",
     "ඇණවුම්", "ආදායම", "කැපවීම්", "වාරික", "ගෙවීම්", "ණය",
-
-    # Tamil
     "பணம்", "சம்பளம்", "சேமிப்பு", "முதலீடு", "செலவு",
     "பட்ஜெட்", "கடன்", "வருவாய்", "நிதி", "சம்பாதி"
 ]
 
 def is_off_topic(msg: str) -> bool:
-    """Return True if user message is NOT finance-related."""
     text = msg.lower()
     return not any(word in text for word in FINANCE_KEYWORDS)
 
@@ -147,8 +141,7 @@ def chatbot():
     user_row = supabase.table("users").select(
         "id, age, monthly_income").eq("id", user_id).execute()
     age = _num(user_row.data[0].get("age", 0)) if user_row.data else 0
-    main_income = _num(
-        user_row.data[0].get("monthly_income", 0)) if user_row.data else 0
+    main_income = _num(user_row.data[0].get("monthly_income", 0)) if user_row.data else 0
 
     # -------------------------
     # 2. Fetch other tables
@@ -160,27 +153,22 @@ def chatbot():
     sms_records = supabase.table("sms_records").select("*").eq("user_id", user_id).execute().data or []
     categories = supabase.table("categories").select("*").eq("user_id", user_id).execute().data or []
 
-    # Create category lookup {id -> name}
     category_lookup = {cat["id"]: cat.get("name", "Other") for cat in categories}
 
-    # Income breakdown
     income_breakdown = {"main_income": main_income, "extras": [], "total": main_income}
     for inc in income_records:
         if inc.get("source") == "BaseMonthly":
             continue
         amt = _num(inc.get("amount", 0))
-        income_breakdown["extras"].append(
-            {"source": inc.get("source", "Other"), "amount": amt})
+        income_breakdown["extras"].append({"source": inc.get("source", "Other"), "amount": amt})
         income_breakdown["total"] += amt
 
-    # Expenses breakdown (mapped to category)
     expense_breakdown = {"items": [], "total": 0.0}
     for exp in expense_records:
         amt = _num(exp.get("amount", 0))
         cat_id = exp.get("category_id")
         cat_name = category_lookup.get(cat_id, exp.get("name", "Other"))
-        expense_breakdown["items"].append(
-            {"name": cat_name, "amount": amt})
+        expense_breakdown["items"].append({"name": cat_name, "amount": amt})
         expense_breakdown["total"] += amt
 
     total_income = income_breakdown["total"]
@@ -188,9 +176,6 @@ def chatbot():
     savings = total_income - total_expenses
     savings_rate = (savings / total_income * 100) if total_income > 0 else 0
 
-    # -------------------------
-    # 3. Benchmarks
-    # -------------------------
     bm_rows = supabase.table("benchmarks").select("*").execute().data or []
     best_row, best_diff = None, float("inf")
     for row in bm_rows:
@@ -200,18 +185,12 @@ def chatbot():
     benchmark = best_row or {}
     typical_rate = _num(benchmark.get("savings_rate", 7))
 
-    # -------------------------
-    # 4. ML model prediction
-    # -------------------------
     try:
         pred_input = np.array([[age, total_income]])
         pred_savings = float(MODEL.predict(pred_input)[0])
     except Exception:
         pred_savings = None
 
-    # -------------------------
-    # 5. Handle missing → Fallback
-    # -------------------------
     user_has_data = (
         total_income > 0 or total_expenses > 0 or accounts or transactions or sms_records or categories
     )
@@ -221,27 +200,19 @@ def chatbot():
         You are SmartSpend’s Finance Assistant 🤖💰.
 
         The user asked: "{user_msg}"
-
-        ### Rules:
-        - Answer the question **directly and clearly**.
-        - Use typical financial practices only if no SmartSpend data exists.
-        - Never assume surplus or income — use only provided values.
-        - Always give **practical, step-by-step suggestions**.
-        - Use clear section headings (e.g., "Current Expenses", "Savings Suggestions").
-        - Use continuous numbering (1, 2, 3...) only for tips/options.
-        - Always show both % and Rs. equivalents.
-        - Keep it neat and encouraging.
         """
         try:
             model = genai.GenerativeModel("gemini-1.5-flash")
             resp = model.generate_content([fallback_prompt])
             return jsonify({"message": clean_response(resp.text), "grounding_used": {"benchmark": benchmark}})
         except Exception as e:
-            return jsonify({"message": f"⚠️ Something went wrong: {e}"})
+            if "429" in str(e) or "quota" in str(e).lower():
+                return jsonify({
+                    "message": "⚠️ Sorry, the daily request limit has been reached for the Finance Assistant. "
+                               "Please try again tomorrow or upgrade the Gemini API plan."
+                }), 429
+            return jsonify({"message": "⚠️ Something went wrong while processing your request."}), 500
 
-    # -------------------------
-    # 6. Normal mode
-    # -------------------------
     grounding = {
         "age": age,
         "income": income_breakdown,
@@ -264,26 +235,6 @@ def chatbot():
     You are SmartSpend’s friendly Finance Assistant 🤖💰.
 
     The user has asked: "{user_msg}"
-
-    ### Data from SmartSpend:
-    - Total income: Rs. {int(total_income):,}
-    - Total expenses: Rs. {int(total_expenses):,}
-    - Surplus (savings): Rs. {int(savings):,}
-    - Savings rate: {savings_rate:.1f}%
-    - Expense breakdown:
-    {exp_list}
-
-    ### Rules:
-    - Answer **only** the user’s actual question (don’t add unrelated extras).
-    - Use the above SmartSpend data (including categories) + benchmarks + ML prediction where relevant.
-    - Provide **clear, actionable suggestions**:
-        • Savings target → % ranges with Rs equivalents.
-        • Investment → specific options with Rs allocations.
-        • Expenses → show relevant categories and totals if available.
-    - Use **natural headings** (like "Current Expenses", "Savings Suggestions").
-    - Use numbered lists only for tips/options.
-    - Bold all Rs. amounts and percentages.
-    - End with one short motivational line.
     """
 
     try:
@@ -291,7 +242,12 @@ def chatbot():
         resp = model.generate_content([prompt])
         return jsonify({"message": clean_response(resp.text), "grounding_used": grounding})
     except Exception as e:
-        return jsonify({"message": f"⚠️ Something went wrong: {e}"})
+        if "429" in str(e) or "quota" in str(e).lower():
+            return jsonify({
+                "message": "⚠️ Sorry, the daily request limit has been reached for the Finance Assistant. "
+                           "Please try again tomorrow or upgrade the Gemini API plan."
+            }), 429
+        return jsonify({"message": "⚠️ Something went wrong while processing your request."}), 500
 
 
 if __name__ == "__main__":

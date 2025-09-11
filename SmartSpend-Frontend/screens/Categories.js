@@ -10,6 +10,10 @@ import {
   Home, Wallet, DollarSign, Lock, X, Bell, Palette, Globe, LogOut, MoreHorizontal,
 } from 'lucide-react-native';
 import { fetchRecommendation, getBudgetingIncome } from './fetchRecommendation';
+import { useNavigation } from '@react-navigation/native';
+
+
+
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -389,6 +393,8 @@ const DeleteModal = memo(function DeleteModal({ visible, onClose, onConfirm, cat
 
 /* -------------------------- Main Screen ----------------------- */
 const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
+  const navigation = useNavigation();
+
   const [userId, setUserId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -519,19 +525,35 @@ const CategoryManager = ({ onBack, onLogout, onTransactions }) => {
   }, []);
 
   /* AI Budget */
-  const handleGetAIBudget = async () => {
-    try {
-      setIsLoadingRecommendation(true);
-      const rec = await fetchRecommendation(); // updates Supabase limits too
-      if (rec) {
-        setRecommendation(rec);
-        await fetchCategories(); // refresh cards with new limits
-        //Alert.alert('AI Budget Applied', 'Limits updated based on your current income.');
+const handleGetAIBudget = async () => {
+  try {
+    setIsLoadingRecommendation(true);
+    const rec = await fetchRecommendation(); // updates Supabase limits too
+    if (rec) {
+      setRecommendation(rec);
+      await fetchCategories(); // refresh cards with new limits
+
+      // ✅ Save grounding data into Supabase
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        await supabase.from("user_grounding").upsert({
+          user_id: user.id,
+          smart_plan: rec,
+          income: userIncome,
+          updated_at: new Date().toISOString(),
+        });
       }
-    } finally {
-      setIsLoadingRecommendation(false);
     }
-  };
+  } finally {
+    setIsLoadingRecommendation(false);
+  }
+};
+
+
+
 
   /* Totals banner (rounded to avoid -0.01 drift) */
   const totals = useMemo(() => validateBudgetTotals(categories, userIncome), [categories, userIncome]);

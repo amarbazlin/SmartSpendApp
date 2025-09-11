@@ -19,6 +19,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { useTranslation } from 'react-i18next';
 import { askInvestAssistant } from '../services/chatApi';
+import { supabase } from '../services/supabase';
 
 function lkr(n) {
   const num = Number(n || 0);
@@ -37,6 +38,7 @@ function sanitizeReply(t = '') {
   });
   out = out.replace(/`([^`]+)`/g, '$1');
   out = out.replace(/^\s*[-*_]{3,}\s*$/gm, '');
+  out = out.replace(/^"[^"]+"\s*$/gm, '');
 
   const ban = [
     /summary in json/i,
@@ -82,17 +84,30 @@ function buildSystemPrimer(grounding) {
     `• Use ONLY the user's actual SmartSpend data or what the user types.`,
     `• If a value is missing, ASK for it. Do NOT assume numbers.`,
     `• Currency is LKR; format like "Rs. 12,345".`,
+    `• The "smart_plan" values represent the USER'S BUDGET LIMITS (planned allocations), NOT actual expenses.`,
+    `• Always call them "budget limits" or "planned allocations". Never call them "expenses".`,
+    `• If asked about actual spending, only respond if explicit transaction/expense data is provided.`,
   ];
+
   if (grounding && typeof grounding === 'object') {
-    base.push(`GROUNDING:`, JSON.stringify(grounding));
+    if (grounding.smartPlan) {
+      base.push(
+        `USER BUDGET LIMITS (smart_plan for this month):`,
+        JSON.stringify(grounding.smartPlan, null, 2)
+      );
+    }
+    if (grounding.income) {
+      base.push(`USER INCOME: Rs. ${grounding.income}`);
+    }
   }
+
   return base.join('\n');
 }
 
 export default function ChatbotScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const grounding = route?.params?.grounding || null;
+  const [groundingState, setGroundingState] = useState(route?.params?.grounding || null);
 
   const { t, i18n } = useTranslation();
   const langMap = { en: 'English', si: 'Sinhala', ta: 'Tamil' };
@@ -118,6 +133,36 @@ export default function ChatbotScreen() {
     });
   }, [i18n.language]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("user_grounding")
+          .select("smart_plan,income")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.log("Grounding fetch error:", error.message);
+          return;
+        }
+
+        if (data) {
+          setGroundingState((prev) => ({
+            ...prev,
+            smartPlan: data.smart_plan,
+            income: data.income,
+          }));
+        }
+      } catch (e) {
+        console.log("Grounding fetch failed:", e.message);
+      }
+    })();
+  }, []);
+
   const [inputBoxHeight, setInputBoxHeight] = useState(46);
   const btnSize = Math.max(34, Math.min(40, Math.round(inputBoxHeight * 0.70)));
   const iconSize = Math.max(16, Math.min(20, Math.round(btnSize * 0.46)));
@@ -142,8 +187,14 @@ export default function ChatbotScreen() {
     setInput('');
     setBusy(true);
 
+    let isActive = true;
+
     try {
-      const sys = { role: 'system', content: buildSystemPrimer(grounding) };
+      const sys = {
+        role: 'system',
+        content: buildSystemPrimer(groundingState),
+      };
+
       const payloadMessages = [sys, ...next];
 
       const appLng = (i18n.language || 'en').slice(0, 2);
@@ -152,16 +203,71 @@ export default function ChatbotScreen() {
       const res = await askInvestAssistant({
         messages: payloadMessages,
         targetLang,
-        grounding,
+        grounding: groundingState,
       });
 
+      if (!isActive) return;
       const cleaned = beautifyMarkdown(res?.message || '', i18n.language || 'en');
-      setMessages([...next, { role: 'assistant', content: cleaned || 'No reply' }]);
 
-      const monthly = res?.suggestions?.monthly_savings_target_lkr ??
-                      res?.snapshot?.rules?.monthly_savings_target_lkr;
-      const buffer  = res?.suggestions?.emergency_buffer_lkr ??
-                      res?.snapshot?.rules?.emergency_buffer_lkr;
+      const planObj = res?.grounding?.smartPlan || groundingState?.smartPlan;
+const userQuery = text.toLowerCase();
+
+let finalMessage;
+
+// ✅ Case 1: Budget-related queries → strict mode
+if (
+  userQuery.includes("budget") ||
+  userQuery.includes("budgets") ||
+  userQuery.includes("limits") ||
+  userQuery.includes("breakdown") ||
+  userQuery.includes("summary") ||
+  (userQuery.includes("all") && userQuery.includes("categories")) || // ✅ flexible "all categories"
+  (userQuery.includes("all") && userQuery.includes("budgets"))      // ✅ flexible "all budgets"
+) {
+  if (planObj && typeof planObj === "object") {
+    if (
+      userQuery.includes("all budgets") ||
+      userQuery.includes("breakdown") ||
+      userQuery.includes("limits") ||
+      userQuery.includes("summary") ||
+      (userQuery.includes("all") && userQuery.includes("categories"))
+    ) {
+      finalMessage =
+        `**Your Budget Limits This Month:**\n` +
+        Object.entries(planObj)
+          .map(([cat, val]) => `- ${cat}: ${lkr(val)}`)
+          .join("\n");
+    } else {
+      const categories = Object.keys(planObj).map((c) => c.toLowerCase());
+      const matched = categories.find((cat) =>
+        userQuery.includes(cat.toLowerCase())
+      );
+      if (matched) {
+        const val =
+          planObj[matched.charAt(0).toUpperCase() + matched.slice(1)];
+        finalMessage = `Your budget limit for **${matched}** this month is **${lkr(val)}**.`;
+      } else {
+        finalMessage =
+          "Please specify a category (e.g., Food, Shopping, Transport).";
+      }
+    }
+  } else {
+    finalMessage = "I don’t see any budget data yet. Please set up your SmartPlan.";
+  }
+} else {
+  finalMessage = cleaned;
+}
+
+
+
+      setMessages([...next, { role: "assistant", content: finalMessage || "No reply" }]);
+
+      const monthly =
+        res?.suggestions?.monthly_savings_target_lkr ??
+        res?.snapshot?.rules?.monthly_savings_target_lkr;
+      const buffer =
+        res?.suggestions?.emergency_buffer_lkr ??
+        res?.snapshot?.rules?.emergency_buffer_lkr;
 
       if (monthly != null || buffer != null) {
         setPlan({
@@ -172,12 +278,20 @@ export default function ChatbotScreen() {
         setPlan(null);
       }
     } catch (e) {
-      Alert.alert('Chatbot', e?.message || 'Failed');
-      setMessages([...next, { role: 'assistant', content: 'Sorry, something went wrong.' }]);
-      setPlan(null);
-    } finally {
-      setBusy(false);
+  if (isActive) {
+    const errorMsg =
+      e?.message ||
+      "⚠️ Sorry, something went wrong with the Finance Assistant. Please try again later.";
+    setMessages([...next, { role: "assistant", content: errorMsg }]);
+    setPlan(null);
+  }
+} finally {
+      if (isActive) setBusy(false);
     }
+
+    return () => {
+      isActive = false;
+    };
   }
 
   function handleQuickPrompt(p) {
@@ -205,9 +319,15 @@ export default function ChatbotScreen() {
           {isUser ? (
             <Text style={styles.msgText}>{item.content}</Text>
           ) : (
-            <Markdown style={mdStyles} mergeStyle onLinkPress={() => true}>
-              {item.content}
-            </Markdown>
+            <View style={{ flexShrink: 1 }}>
+              {item.content ? (
+                <Markdown style={mdStyles} mergeStyle onLinkPress={() => true}>
+                  {item.content}
+                </Markdown>
+              ) : (
+                <Text style={styles.msgText}>…</Text>
+              )}
+            </View>
           )}
         </View>
 
@@ -259,7 +379,8 @@ export default function ChatbotScreen() {
       <FlatList
         ref={listRef}
         data={messages}
-        keyExtractor={(item, i) => `${item.role}-${i}-${item.content.slice(0,20)}`}
+        extraData={messages}
+        keyExtractor={(_, index) => index.toString()}
         contentContainerStyle={{ padding: 12, gap: 10, paddingBottom: 12 }}
         renderItem={renderItem}
         removeClippedSubviews={false}
@@ -436,7 +557,7 @@ const mdStyles = {
   heading1: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#1E3A8A',           // Deep blue heading
+    color: '#1E3A8A',
     marginTop: 12,
     marginBottom: 8,
     borderLeftWidth: 4,
@@ -448,7 +569,7 @@ const mdStyles = {
   heading2: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#1E40AF',           // Darker blue for sub-headings
+    color: '#1E40AF',
     marginTop: 10,
     marginBottom: 6,
     borderLeftWidth: 3,
