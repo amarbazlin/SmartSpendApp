@@ -11,7 +11,7 @@ const appExtra =
   {};
 
 // Base URL for your Python/AI backend (no trailing slash)
-const AI_URL = 'https://smartspend-backend-production.up.railway.app';
+const AI_URL = 'smartspend-production-6630.up.railway.app';
 
 /* ------------------------------------------------------------------ */
 /*                              Session                                */

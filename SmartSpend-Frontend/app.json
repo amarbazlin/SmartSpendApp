@@ -6,8 +6,14 @@
     "orientation": "portrait",
     "icon": "./screens/images/App_Logo_imresizer.png",
     "userInterfaceStyle": "light",
-    "platforms": ["ios", "android", "web"],
-    "assetBundlePatterns": ["**/*"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       "expo-dev-client",
       [
@@ -25,10 +31,10 @@
       ]
     ],
     "android": {
-      "package": "com.amarbazlin.smartspend"
+      "package": "com.omesha2004.smartspend"
     },
     "ios": {
-      "bundleIdentifier": "com.amarbazlin.smartspend",
+      "bundleIdentifier": "com.omesha2004.smartspend",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -38,10 +44,11 @@
       "output": "static"
     },
     "extra": {
-      "apiUrl": "https://0da41aa167cb.ngrok-free.app",
+      "apiUrl": "https://smartspend-production-6630.up.railway.app",
       "eas": {
-        "projectId": "241604e1-17cd-4dde-b919-c778a6dbc7a2"
+        "projectId": "a0e1fb20-b043-4f04-823a-65205a719bf1"
       }
-    }
+    },
+    "owner": "omesha2004"
   }
 }

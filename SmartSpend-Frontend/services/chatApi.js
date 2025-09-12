@@ -1,13 +1,8 @@
 // SmartSpend-Frontend/services/chatApi.js
-import { Platform } from "react-native";
 import { supabase } from "./supabase";
 
-const BACKEND_URL =
-  process.env.EXPO_PUBLIC_BACKEND_URL ||
-  (Platform.OS === "android"
-    ? "http://10.0.2.2:5050"
-    : "http://localhost:5050") ||
-  "http://172.20.10.4:5050"; // adjust if LAN testing on real device
+// 🔗 Always use the hosted Railway backend in production
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://smartspend-production-6630.up.railway.app";
 
 export async function askInvestAssistant({ messages, targetLang, grounding }) {
   try {
@@ -88,7 +83,7 @@ export async function askInvestAssistant({ messages, targetLang, grounding }) {
 
     // ✅ Parse JSON safely
     return await res.json();
-    } catch (err) {
+  } catch (err) {
     console.error("askInvestAssistant error:", err.message || err);
     return {
       message:
@@ -96,5 +91,4 @@ export async function askInvestAssistant({ messages, targetLang, grounding }) {
         "⚠️ Sorry, something went wrong with the Finance Assistant. Please try again later.",
     };
   }
-
 }
