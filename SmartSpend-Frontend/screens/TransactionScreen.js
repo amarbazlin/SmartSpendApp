@@ -594,11 +594,13 @@ export default function TransactionsScreen({ onBack, onLogout, navigation }) {
             <View style={styles.emojiContainer}><Text style={styles.categoryEmoji}>{categoryEmoji}</Text></View>
             <View style={styles.transactionTextWrap}>
               <Text style={styles.transactionCategory} numberOfLines={1} ellipsizeMode="tail">
-                {leftTitle} {isFromSMS && <Text style={{ fontSize: 12, color: '#008080' }}>• SMS</Text>}
-              </Text>
-              <Text style={styles.transactionMethod} numberOfLines={1} ellipsizeMode="tail">
-                {item.payment_method || 'Cash'}
-              </Text>
+  {t(`categories.${(displayCategory || 'other').toLowerCase()}`, displayCategory)}
+  {isFromSMS && <Text style={{ fontSize: 12, color: '#008080' }}> • SMS</Text>}
+</Text>
+<Text style={styles.transactionMethod} numberOfLines={1} ellipsizeMode="tail">
+  {t(`tx.labels.${(item.payment_method || 'cash').toLowerCase()}`, item.payment_method || 'Cash')}
+</Text>
+
             </View>
           </View>
 
@@ -755,11 +757,19 @@ export default function TransactionsScreen({ onBack, onLogout, navigation }) {
         <View style={styles.detailsOverlay}>
           <View style={styles.detailsCard}>
             <Text style={styles.detailsTitle}>{t('tx.details.title')}</Text>
-
-            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.category')}: </Text>{selectedTransaction?.category || 'Other'}</Text>
+            <Text style={styles.detailLine}>
+  <Text style={styles.detailLabel}>{t('tx.details.category')}: </Text>
+  {t(`categories.${(selectedTransaction?.category || 'other').toLowerCase()}`, selectedTransaction?.category || 'Other')}
+</Text>
             <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.amount')}: </Text>Rs. {Number(selectedTransaction?.amount || 0).toFixed(2)}</Text>
-            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.type')}: </Text>{selectedTransaction?.type}</Text>
-            <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.paymentMethod')}: </Text>{selectedTransaction?.payment_method || 'Cash'}</Text>
+            <Text style={styles.detailLine}>
+  <Text style={styles.detailLabel}>{t('tx.details.type')}: </Text>
+  {t(`tx.inline.${selectedTransaction?.type}`, selectedTransaction?.type)}
+</Text>
+            <Text style={styles.detailLine}>
+  <Text style={styles.detailLabel}>{t('tx.details.paymentMethod')}: </Text>
+  {t(`tx.labels.${(selectedTransaction?.payment_method || 'cash').toLowerCase()}`, selectedTransaction?.payment_method || 'Cash')}
+</Text>
             <Text style={styles.detailLine}><Text style={styles.detailLabel}>{t('tx.details.date')}: </Text>{selectedTransaction?.date ?? '-'}</Text>
 
             {selectedTransaction?.description ? (

@@ -91,21 +91,50 @@ const resources = {
       charts: { spendingByCategory: 'Spending by Category', totalSpent: 'Total Spent: {{amount}}' },
 
       categories: {
-        food: 'Food', shopping: 'Shopping', bills: 'Bills', transport: 'Transport',
-        income: 'Income', interest: 'Interest', refund: 'Refund', qr: 'QR Payment',
-        atm: 'ATM Withdrawal', cashAdvance: 'Cash Advance', other: 'Other',
-      },
+  // Core
+  food: 'Food',
+  healthcare: 'Healthcare',
+  utilities: 'Utilities',
+  transport: 'Transport',
+
+  // Optional
+  housing: 'Housing',
+  education: 'Education',
+  savings: 'Savings',
+  entertainment: 'Entertainment',
+  shopping: 'Shopping',
+  clothing: 'Clothing',
+  subscriptions: 'Subscriptions',
+  personalCare: 'Personal Care',
+  pets: 'Pets',
+  gifts: 'Gifts',
+  insurance: 'Insurance',
+  debt: 'Debt',
+  charity: 'Charity',
+  baseMonthly: 'Base Monthly',
+
+
+  // Income-related
+  income: 'Income',
+  interest: 'Interest',
+  refund: 'Refund',
+  qr: 'QR Payment',
+  atm: 'ATM Withdrawal',
+  cashAdvance: 'Cash Advance',
+  other: 'Other',
+},
+
 
       language: {
         title: 'Language', subtitle: 'Choose your app language', system: 'System language: {{lang}}',
-        english: 'English', sinhala: 'Sinhala (සිංහල)', tamil: 'Tamil (தமிழ்)', done: 'Done',
+        english: 'English', sinhala: 'Sinhala (සිංහල)', tamil: 'Tamil (தமிழ்)', done: 'Done', 
       },
 
       chat: {
         title: 'Finance Assistant',
         subtitle: 'Plan, save, spend smarter',
         newChat: 'New Chat',
-        placeholder: 'Ask anything…',
+        placeholder: 'Type here…',
         // NEW
         intro:
           "Hi! I’m your SmartSpend Finance Assistant. Let’s build your custom plan to save more and invest wisely. I’ll set smart savings targets and share clear, actionable investment steps tailored to your budget.",
@@ -192,10 +221,36 @@ const resources = {
       charts: { spendingByCategory: 'ප්‍රවර්ග අනුව වියදම්', totalSpent: 'ගෙවූ මුදල: {{amount}}' },
 
       categories: {
-        food: 'ආහාර', shopping: 'සාප්පු සවාරි', bills: 'බිල්පත්', transport: 'ගමනාගමනය',
-        income: 'ආදායම', interest: 'පොලී', refund: 'ආපසු මුදල්', qr: 'QR ගෙවීම',
-        atm: 'ATM නැගීම', cashAdvance: 'මුදල් කඩඉම්', other: 'අනිත්',
-      },
+  food: 'ආහාර',
+  healthcare: 'සෞඛ්‍ය සත්කාර',
+  utilities: 'උපයෝගිතා',
+  transport: 'ගමනාගමනය',
+
+  housing: 'නිවාස',
+  education: 'අධ්‍යාපන',
+  savings: 'ඉතිරිකිරීම්',
+  entertainment: 'විනෝදය',
+  shopping: 'සාප්පු සවාරි',
+  clothing: 'ඇඳුම්',
+  subscriptions: 'දායකත්ව',
+  personalCare: 'පුද්ගලික සැලකිල්ල',
+  pets: 'සුරතල් සතුන්',
+  gifts: 'තෑගි',
+  insurance: 'විමාව',
+  debt: 'ණය',
+  charity: 'දානය',
+  baseMonthly: 'මූලික මාසික',
+
+
+  income: 'ආදායම',
+  interest: 'පොලී',
+  refund: 'ආපසු මුදල්',
+  qr: 'QR ගෙවීම',
+  atm: 'ATM නැගීම',
+  cashAdvance: 'මුදල් කඩඉම්',
+  other: 'අනිත්',
+},
+
 
       language: {
         title: 'භාෂාව', subtitle: 'යෙදුමේ භාෂාව තෝරන්න', system: 'පද්ධති භාෂාව: {{lang}}',
@@ -291,10 +346,36 @@ const resources = {
       charts: { spendingByCategory: 'வகைப் படி செலவுகள்', totalSpent: 'மொத்த செலவு: {{amount}}' },
 
       categories: {
-        food: 'உணவு', shopping: 'ஷாப்பிங்', bills: 'பில்கள்', transport: 'போக்குவரத்து',
-        income: 'வருமானம்', interest: 'வட்டி', refund: 'பணம் திரும்ப', qr: 'QR கட்டணம்',
-        atm: 'ATM பணம் எடுப்பு', cashAdvance: 'பண முன்பணம்', other: 'மற்றவை',
-      },
+  food: 'உணவு',
+  healthcare: 'சுகாதாரம்',
+  utilities: 'பயன்பாடுகள்',
+  transport: 'போக்குவரத்து',
+
+  housing: 'வீடு',
+  education: 'கல்வி',
+  savings: 'சேமிப்பு',
+  entertainment: 'வேடிக்கை',
+  shopping: 'ஷாப்பிங்',
+  clothing: 'ஆடை',
+  subscriptions: 'சந்தாக்கள்',
+  personalCare: 'தனிப்பட்ட பராமரிப்பு',
+  pets: 'செல்லப்பிராணிகள்',
+  gifts: 'பரிசுகள்',
+  insurance: 'காப்பீடு',
+  debt: 'கடன்',
+  charity: 'தானம்',
+  baseMonthly: 'அடிப்படை மாதாந்திரம்',
+
+
+  income: 'வருமானம்',
+  interest: 'வட்டி',
+  refund: 'பணம் திரும்ப',
+  qr: 'QR கட்டணம்',
+  atm: 'ATM பணம் எடுப்பு',
+  cashAdvance: 'பண முன்பணம்',
+  other: 'மற்றவை',
+},
+
 
       language: {
         title: 'மொழி', subtitle: 'பயன்பாட்டு மொழியைத் தேர்வு செய்யவும்', system: 'கணினி மொழி: {{lang}}',
