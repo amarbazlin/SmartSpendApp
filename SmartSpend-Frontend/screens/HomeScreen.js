@@ -132,6 +132,7 @@ const parseBankSMS = (sms) => {
 };
 
 /* ----------------------------- More Menu ----------------------------- */
+/* ----------------------------- More Menu ----------------------------- */
 const MoreMenu = ({ isOpen, onClose, onLogout, navigation }) => {
   const { t } = useTranslation();
   const [name, setName]   = useState('');
@@ -258,7 +259,6 @@ const MoreMenu = ({ isOpen, onClose, onLogout, navigation }) => {
     </Modal>
   );
 };
-
 export default function HomeScreen({ navigation, onLogout }) {
   const { t } = useTranslation();
 

@@ -2,7 +2,7 @@
 import { supabase } from "./supabase";
 
 // 🔗 Always use the hosted Railway backend in production
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://smartspend-production-6630.up.railway.app";
+const BACKEND_URL = "https://smartspend-production-6630.up.railway.app";
 
 export async function askInvestAssistant({ messages, targetLang, grounding }) {
   try {

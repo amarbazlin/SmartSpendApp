@@ -10,8 +10,8 @@ const appExtra =
   (Constants?.manifest && Constants.manifest.extra) ||
   {};
 
-// Base URL for your Python/AI backend (no trailing slash)
-const AI_URL = 'smartspend-production-6630.up.railway.app';
+// Fixed Base URL for your Python/AI backend (with https://)
+const BASE_URL = 'https://smartspend-production-6630.up.railway.app';
 
 /* ------------------------------------------------------------------ */
 /*                              Session                                */
@@ -162,7 +162,7 @@ function isValidCategory(name, weightsMap) {
   if (n.length < 3 || !/[a-z]/.test(n)) return false;
 
   // 4) If user actually spent in it this month, keep it (user-specific)
-  //    This lets reasonable custom names pass when they’re used.
+  //    This lets reasonable custom names pass when they're used.
   if (weightsMap && Number(weightsMap[name]) > 0) return true;
 
   // 5) Otherwise reject by default (prevents nonsense buckets from taking money)
@@ -343,21 +343,78 @@ function postProcessRecommendation({ rawRec, income, categories, weights }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*                     Test Multiple Endpoints                         */
+/* ------------------------------------------------------------------ */
+const testEndpoints = async (requestData) => {
+  const endpoints = [
+    '/recommend',
+    '/api/recommend', 
+    '/recommendation',
+    '/api/recommendation',
+    '/api/v1/recommend',
+    '/budget/recommend',
+    '/ai/recommend'
+  ];
+
+  console.log('🔍 Testing endpoints for AI service...');
+
+  for (const endpoint of endpoints) {
+    try {
+      const fullUrl = `${BASE_URL}${endpoint}`;
+      console.log(`Testing: ${fullUrl}`);
+      
+      const response = await axios.post(fullUrl, requestData, {
+        timeout: 8000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      });
+      
+      console.log(`✅ SUCCESS: ${endpoint}`, response.status);
+      console.log('Response data:', response.data);
+      return response; // Return the first successful response
+      
+    } catch (error) {
+      const status = error.response?.status;
+      const statusText = error.response?.statusText;
+      
+      console.log(`❌ Failed: ${endpoint} - Status: ${status || 'Network Error'}`);
+      
+      if (status === 405) {
+        console.log('  → Method not allowed (might need GET instead of POST)');
+      } else if (status === 422) {
+        console.log('  → Validation error - check request data format');
+        console.log('  → Response:', error.response?.data);
+      } else if (status === 500) {
+        console.log('  → Server error - check backend logs');
+      }
+    }
+  }
+  
+  throw new Error('All endpoints failed - check backend deployment and routes');
+};
+
+/* ------------------------------------------------------------------ */
 /*                           Main function                             */
 /* ------------------------------------------------------------------ */
 export const fetchRecommendation = async () => {
   try {
+    console.log('🚀 Starting fetchRecommendation...');
+    
     const uid = await getCurrentUserId();
     if (!uid) {
-      Alert.alert('Please log in first.');
+      Alert.alert('Authentication Required', 'Please log in first.');
       return null;
     }
+    console.log('✅ User ID obtained:', uid);
 
     const { income, age } = await getBudgetingIncome(uid);
     if (!(income > 0)) {
-      Alert.alert('Income missing', 'Please add your income first.');
+      Alert.alert('Income Missing', 'Please add your monthly income first in settings.');
       return null;
     }
+    console.log('✅ Income and age obtained:', { income, age });
 
     // Pull categories (ids + names)
     const { data: cats, error: cErr } = await supabase
@@ -369,9 +426,11 @@ export const fetchRecommendation = async () => {
 
     const allNames = (cats || []).map(c => c.name);
     const nameToId = Object.fromEntries((cats || []).map(c => [norm(c.name), c.id]));
+    console.log('✅ Categories loaded:', allNames);
 
     // Recent spend weights (used both for allocation and for validating custom cats)
     const weights = await getRecentSpendWeights(uid);
+    console.log('✅ Spending weights calculated:', weights);
 
     // ---- Filter categories (skip junk like "blah") ----
     const validNames = [];
@@ -381,28 +440,41 @@ export const fetchRecommendation = async () => {
       else skipped.push(nm);
     }
 
+    console.log('✅ Valid categories:', validNames);
+    console.log('⚠️ Skipped categories:', skipped);
+
     if (validNames.length === 0) {
       Alert.alert(
-        'No valid categories',
-        'Your categories look invalid for budgeting. Please rename or add sensible categories (e.g., Food, Transport, Utilities, Entertainment) and try again.'
+        'No Valid Categories',
+        'Your categories look invalid for budgeting. Please add sensible categories like Food, Transport, Utilities, Entertainment and try again.'
       );
       return null;
     }
 
-    // Call AI service with only valid categories
-    const res = await axios.post(
-      `${AI_URL}/recommend`,
-      { age, income, categories: validNames, weights },
-      { timeout: 15000 }
-    );
+    // Prepare request data
+    const requestData = { 
+      age: age || 25, // fallback age if not provided
+      income, 
+      categories: validNames, 
+      weights 
+    };
+    
+    console.log('📤 Request data prepared:', requestData);
 
-    const recRaw = res.data?.recommendation;
-    if (!recRaw) {
-      Alert.alert('AI error', 'No recommendation returned.');
+    // Call AI service with endpoint testing
+    console.log('🌐 Calling AI service...');
+    const res = await testEndpoints(requestData);
+
+    const recRaw = res.data?.recommendation || res.data;
+    if (!recRaw || typeof recRaw !== 'object') {
+      console.error('❌ Invalid AI response:', res.data);
+      Alert.alert('AI Service Error', 'Invalid response format from AI service.');
       return null;
     }
 
-    // Post-process
+    console.log('✅ AI recommendation received:', recRaw);
+
+    // Post-process the recommendation
     const { rounded: rec, reasons } = postProcessRecommendation({
       rawRec: recRaw,
       income,
@@ -410,22 +482,37 @@ export const fetchRecommendation = async () => {
       weights,
     });
 
-    // Persist ONLY valid categories
-    await Promise.all(
-      Object.entries(rec).map(async ([name, amount]) => {
-        const id = nameToId[norm(name)];
-        if (!id) return;
-        await supabase.from('categories').update({ limit_: Number(amount) }).eq('id', id);
-      })
-    );
+    console.log('✅ Processed recommendation:', rec);
 
-    // Alerts
+    // Persist ONLY valid categories to database
+    console.log('💾 Updating category limits in database...');
+    const updatePromises = Object.entries(rec).map(async ([name, amount]) => {
+      const id = nameToId[norm(name)];
+      if (!id) {
+        console.warn(`⚠️ No ID found for category: ${name}`);
+        return;
+      }
+      
+      try {
+        await supabase
+          .from('categories')
+          .update({ limit_: Number(amount) })
+          .eq('id', id);
+        console.log(`✅ Updated ${name}: Rs. ${amount}`);
+      } catch (err) {
+        console.error(`❌ Failed to update ${name}:`, err);
+      }
+    });
+
+    await Promise.all(updatePromises);
+    console.log('✅ Database updates completed');
+
+    // Show appropriate alerts
     if (skipped.length > 0) {
       const shown = skipped.slice(0, 6).join(', ') + (skipped.length > 6 ? '…' : '');
       Alert.alert(
-        'Skipped some categories',
-        `These categories were ignored because they look invalid or unused this month: ${shown}\n\n` +
-        `Tip: rename them to something meaningful (e.g., "Subscriptions", "Gifts") or remove them.`
+        'Categories Skipped',
+        `These categories were ignored because they appear invalid or unused:\n\n${shown}\n\nTip: Rename them to something meaningful (e.g., "Subscriptions", "Gifts") or remove them.`
       );
     }
 
@@ -433,20 +520,42 @@ export const fetchRecommendation = async () => {
     if (zeroCats.length > 0) {
       const list = zeroCats.slice(0, 6).join(', ') + (zeroCats.length > 6 ? '…' : '');
       Alert.alert(
-        'Heads up',
-        `Some categories were set to Rs. 0 to fit your Rs. ${income.toLocaleString()} income after covering essentials.\n\n` +
-        `Zeroed: ${list}\n\n` 
+        'Budget Adjusted',
+        `Some categories were set to Rs. 0 to fit your Rs. ${income.toLocaleString()} income after covering essentials:\n\n${list}\n\nYou can manually adjust any limits in the budget screen.`
       );
     } else if (skipped.length === 0) {
-      Alert.alert('Smart plan set', 'All categories received a budget this month. You can edit any limit below.'+
-        `Go to "Budgets" to view and adjust your budget plan.`
+      Alert.alert(
+        'Smart Budget Created! 🎯', 
+        'Your personalized budget plan has been created successfully. All categories have been assigned optimal amounts based on your income and spending patterns.\n\nGo to "Budgets" to view and fine-tune your plan.'
       );
     }
 
+    console.log('✅ fetchRecommendation completed successfully');
     return rec;
-  } catch (e) {
-    console.log('fetchRecommendation error:', e);
-    Alert.alert('Failed', e.message || 'Unknown error.');
+
+  } catch (error) {
+    console.error('❌ fetchRecommendation error:', error);
+    
+    // More specific error handling
+    if (error.message?.includes('All endpoints failed')) {
+      Alert.alert(
+        'AI Service Unavailable', 
+        'Cannot connect to the AI budgeting service. Please check:\n\n• Your internet connection\n• Try again in a few moments\n\nIf the problem persists, contact support.'
+      );
+    } else if (error.code === 'ENOTFOUND') {
+      Alert.alert(
+        'Connection Error', 
+        'Cannot reach the AI service. Please check your internet connection and try again.'
+      );
+    } else if (error.response?.status >= 500) {
+      Alert.alert(
+        'Service Error', 
+        'The AI service is temporarily unavailable. Please try again in a few minutes.'
+      );
+    } else {
+      Alert.alert('Error', error.message || 'An unexpected error occurred. Please try again.');
+    }
+    
     return null;
   }
 };
