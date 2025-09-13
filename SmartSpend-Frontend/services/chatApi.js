@@ -69,7 +69,7 @@ export async function askInvestAssistant({ messages, targetLang, grounding }) {
       if (res.status === 429) {
         throw new Error(
           "⚠️ Sorry, the daily request limit has been reached for the Finance Assistant. " +
-            "Please try again tomorrow when your quota resets, or upgrade your Gemini API plan."
+            "Please try again tomorrow. , and I’ll be ready to help you again with your financial planning."
         );
       }
 
