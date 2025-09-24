@@ -1,0 +1,13 @@
+appId: host.exp.exponent
+name: F01 - Load Chatbot test
+---
+- launchApp
+- tapOn: "SmartSpend"
+
+- assertVisible: "Home"
+
+- scroll
+- tapOn: "AI Chatbot"
+
+- assertVisible: "Finance Assistant"
+- assertVisible: "What should my monthly savings target be?"

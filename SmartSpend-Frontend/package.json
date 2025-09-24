@@ -4,6 +4,9 @@
   "private": true,
   "main": "expo/AppEntry",
   "scripts": {
+    "fun": "maestro test --format html --output .maestro/Fun/functionality.html .maestro/Fun/",
+    "val": "maestro test --format html --output .maestro/Val/validity.html .maestro/Val/",
+    "int": "maestro test --format html --output .maestro/Int/integrity.html .maestro/Int/",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
