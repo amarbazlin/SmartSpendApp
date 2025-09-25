@@ -11,7 +11,8 @@ const appExtra =
   {};
 
 // Fixed Base URL for your Python/AI backend (with https://)
-const BASE_URL = 'https://smartspend-production-6630.up.railway.app';
+
+const BASE_URL = 'http://192.168.75.202:5050';
 
 /* ------------------------------------------------------------------ */
 /*                              Session                                */
