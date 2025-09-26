@@ -376,8 +376,14 @@ def chatbot():
         typical_rate = 7
 
     # ML prediction
+    # ML prediction (safe wrapper)
+        # -------------------------
+    # ML prediction (safe wrapper)
+    # -------------------------
     try:
+        pred_savings = None
         if MODEL is not None:
+            # Ensure input is always a 2D array or DataFrame
             if len(FEATURES) >= 2:
                 input_data = pd.DataFrame({
                     FEATURES[0]: [age],
@@ -385,12 +391,17 @@ def chatbot():
                 })
             else:
                 input_data = np.array([[age, total_income]])
-            pred_savings = float(MODEL.predict(input_data)[0])
-        else:
-            pred_savings = None
+
+            raw_pred = MODEL.predict(input_data)
+            if isinstance(raw_pred, (list, np.ndarray)) and len(raw_pred) > 0:
+                pred_savings = float(raw_pred[0])
+            else:
+                print("⚠️ ML returned empty or invalid prediction.")
     except Exception as e:
-        print(f"❌ ML prediction failed: {e}")
+        print(f"❌ ML prediction failed in chatbot: {e}")
         pred_savings = None
+
+
 
     user_has_data = (
         total_income > 0 or total_expenses > 0 or accounts or transactions or sms_records or categories

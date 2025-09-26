@@ -12,7 +12,7 @@ const appExtra =
 
 // Fixed Base URL for your Python/AI backend (with https://)
 
-const BASE_URL = 'http://192.168.1.5:5050';                            //http://192.168.75.202:5050
+const BASE_URL = 'http://192.168.1.3:5050';                            //http://192.168.75.202:5050
 
 /* ------------------------------------------------------------------ */
 /*                              Session                                */

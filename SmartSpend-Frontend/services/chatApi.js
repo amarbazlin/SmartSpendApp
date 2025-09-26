@@ -2,7 +2,7 @@
 import { supabase } from "./supabase";
 
 // 🔗 Always use the hosted Railway backend in production
-const BACKEND_URL = "http://192.168.75.202:5050";
+const BACKEND_URL = "http://192.168.1.3:5050";
 
 export async function askInvestAssistant({ messages, targetLang, grounding }) {
   try {

@@ -33,7 +33,7 @@ export default function App() {
         console.log('Initializing Supabase connection...');
         
         // Test API connection first
-        const apiUrl = Constants.expoConfig?.extra?.apiUrl || 'http://192.168.75.202:5050';
+        const apiUrl = Constants.expoConfig?.extra?.apiUrl || 'http://192.168.1.3:5050';
         console.log('Testing API connection to:', apiUrl);
         
         try {
